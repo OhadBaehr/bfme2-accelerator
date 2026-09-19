@@ -1,0 +1,10 @@
+// Cover art embedded in the loader, so the whole thing still ships as two files.
+101 RCDATA "art\\tile_bfme2.jpg"
+102 RCDATA "art\\tile_rotwk.jpg"
+103 RCDATA "art\\tile_aotr.jpg"
+// The mark, drawn in the window header beside the name.
+104 RCDATA "art\\logo.png"
+// The icon Explorer and the title bar use. Resource 1 so it is the one Windows picks.
+1 ICON "art\\accel.ico"
+// Common Controls 6 and the administrator level, in one manifest of our own.
+1 24 "launcher.manifest"

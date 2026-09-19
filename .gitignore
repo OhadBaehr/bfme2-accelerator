@@ -1,0 +1,63 @@
+# ---- build output ---------------------------------------------------------------------------------------
+*.obj
+*.exe
+*.dll
+*.lib
+*.exp
+*.map
+*.pdb
+*.ilk
+*.idb
+*.res
+variant_obj/
+dist/
+# rt_harness runs against the d3d9.dll the game itself uses (DXVK's) and the system d3dx9_27.dll. Both are
+# copied into src/ by hand; neither is ours to redistribute.
+
+# ---- cover art --------------------------------------------------------------------------------------------
+# The three games' cover images belong to their owners and are not in this repository. prepare_art.bat drops
+# the placeholders from src/art/placeholder into src/art when these are missing.
+src/art/tile_bfme2.jpg
+src/art/tile_rotwk.jpg
+src/art/tile_aotr.jpg
+
+# ---- superseded copies ------------------------------------------------------------------------------------
+*.bak
+*.bak-*
+*.bak.*
+*.prebak
+*.orig
+*.v[0-9]*
+backups/
+
+# ---- written at runtime -----------------------------------------------------------------------------------
+*.log
+capture_*.txt
+src/t600.txt
+src/t1500.txt
+src/t1500w.txt
+src/tnf.txt
+src/inject_result.txt
+# rttest-refs/ is tracked: those are the reference hashes a run is compared against.
+
+# ---- marker files: local switches, read from beside the DLL -----------------------------------------------
+DIAG_ON
+CAPTURE_ON
+ANY_BINARY_OK
+SLICER_OFF
+
+# ---- the loader's own settings: where each game is on THIS machine ----------------------------------------
+bfme2_accel.ini
+launcher.txt
+
+# ---- python -----------------------------------------------------------------------------------------------
+__pycache__/
+*.pyc
+
+# ---- editor and OS ------------------------------------------------------------------------------------------
+.vs/
+*.user
+*.suo
+Thumbs.db
+desktop.ini
+.DS_Store

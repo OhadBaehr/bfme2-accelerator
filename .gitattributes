@@ -1,0 +1,29 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Batch files MUST keep CRLF. cmd.exe seeks through a .bat by byte offset and mis-lands when the line endings
+# are bare LF - a build script checked out with LF arrived as "etlocal is not recognized" because the "s" of
+# "setlocal" was skipped. This is not cosmetic; an LF .bat is a broken .bat.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Source and notes: normal text, LF in the repository.
+*.cpp   text
+*.h     text
+*.inc   text
+*.py    text
+*.md    text
+*.txt   text
+*.rc    text
+*.ini   text
+
+# Binary, never touched.
+*.jpg   binary
+*.png   binary
+*.webp  binary
+*.dll   binary
+*.exe   binary
+*.obj   binary
+*.res   binary
+*.dat   binary
+*.big   binary
