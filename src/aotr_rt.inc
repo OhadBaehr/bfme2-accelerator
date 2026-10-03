@@ -101,6 +101,10 @@ static __forceinline DWORD rtAl16(DWORD n) { return (n + 15) & ~15u; }
 static __forceinline DWORD* rtArgs(RtRec* r) { return (DWORD*)(r + 1); }
 static __forceinline BYTE* rtPayload(RtRec* r) { return (BYTE*)r + rtAl16(sizeof(RtRec) + (DWORD)r->nargs * 4); }
 static void rtDrain();
+static void rtRetireDeviceRefs();
+static DWORD g_rtLastResourceRelease = 0;
+static bool g_rtHaveResourceRelease = false;
+static bool g_rtDeviceReleaseFast = true;
 static void rtInstall(void* fx);
 static const char* rtOpName(int op);
 static DWORD WINAPI rtKeyThread(LPVOID);
@@ -273,6 +277,7 @@ static __forceinline void rtCommit(RtRec* r, DWORD po) {
     if (g_capOn) capRecord(r, po);
     r->size = rtAl16((DWORD)(rtPayload(r) - (BYTE*)r) + po);
     r->seq = ++g_rtSeq;
+    if (r->flags & 2) { g_rtLastResourceRelease = r->seq; g_rtHaveResourceRelease = true; }
     g_rtLocalHead = (DWORD)((BYTE*)r - g_rtBuf) + r->size;
     PSTAT(g_rtNAsync++; g_rtBytes += r->size; g_rtOpN[r->op & 511]++);
     if (++g_rtPH.unpublished >= 32 || (r->flags & 1)) rtPublish();   // Present publishes immediately
@@ -293,7 +298,7 @@ static void rtFxClose() {
 static void rtDrain() {
     if (g_rtFxRec) rtFxClose();                          // the drain target has to include the open batch
     DWORD target = g_rtSeq;
-    if (rtSeqReached(g_rtExecSeq, target)) { g_rtCurOp = 511; return; }
+    if (rtSeqReached(g_rtExecSeq, target)) { g_rtCurOp = 511; g_rtHaveResourceRelease = false; rtRetireDeviceRefs(); return; }
     rtPublish();
     LONG64 t0 = qpcNow();
     g_rtDrains++;
@@ -315,6 +320,8 @@ static void rtDrain() {
     InterlockedExchange(&g_rtDrainWaiting, 0);
     LONG64 dt = qpcNow() - t0;
     g_rtDrainTicks += dt; g_rtDrainOpTicks[g_rtCurOp & 511] += dt; g_rtCurOp = 511;
+    g_rtHaveResourceRelease = false;
+    rtRetireDeviceRefs();
 }
 static __forceinline bool rtIsName(DWORD h) { return h != 0 && (h & 0x80000003u) != 0x80000003u; }
 static DWORD rtStrBytes(DWORD s) {
@@ -724,6 +731,7 @@ typedef DWORD (__stdcall* RtS1)(void*);
 typedef DWORD (__stdcall* RtS2)(void*, DWORD);
 typedef DWORD (__stdcall* RtS3)(void*, DWORD, DWORD);
 typedef DWORD (__stdcall* RtS4)(void*, DWORD, DWORD, DWORD);
+#include "aotr_rt_release.inc"
 static DWORD __stdcall rt_fx_2(void* self) {                                                    // ID3DXEffect::Release
     DWORD tid = GetCurrentThreadId();
     if (!g_rtActive && !g_rtTried && rtIsGameThread(tid) && !g_rtXDepth) rtInstall(self);
@@ -2046,6 +2054,8 @@ static void rtInit() {                                  // any thread; hooks the
 }
 static void rtInitBody() {
     char env[8]; env[0] = 0;
+    if (GetEnvironmentVariableA("AOTR_DEVICE_RELEASE_FAST", env, sizeof(env)) && env[0] == '0') g_rtDeviceReleaseFast = false;
+    env[0] = 0;
     if (GetEnvironmentVariableA("AOTR_RT", env, sizeof(env)) && env[0] == '0') { g_rtTried = true; logf("rt: disabled by AOTR_RT=0."); return; }
     rtOpNoTouchInit();
     g_rtDs.on = 1;
@@ -2223,6 +2233,7 @@ static DWORD WINAPI rtReport(LPVOID) {
         for (int p = 0; p < 3; ++p) { LONG64 I = rd64(&g_stTicks[p]); LONG64 d = I - lSt[p]; lSt[p] = I;
             if (p == 0) sh = d; else if (p == 1) vw = d; else ui = d; }
         LONG a = g_rtNAsync, s = g_rtNSync, rl = g_rtNRelease, fo = g_rtNForeign, pr = g_rtNPresent, sc = g_rtNScope;
+        logf("rt: device release fast-path calls %d; retained references retired %d (cumulative).", (int)g_rtNDeviceReleaseFast, (int)g_rtNDeviceRefRetired);
         LONG64 dr = rd64(&g_rtDrainTicks), bu = rd64(&g_rtBusyTicks), by = rd64(&g_rtBytes), pw = rd64(&g_rtPresentWaitTicks);
         LONG f = dF > 0 ? dF : 1;
         char m1[16], m2[16], m3[16], m4[16], m5[16], m6[16], m7[16], m8[16], q1[16], q2[16], q3[16], q4[16], mb[16];

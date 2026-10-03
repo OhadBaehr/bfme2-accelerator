@@ -259,7 +259,7 @@ int main(int argc, char** argv) {
     ((HRESULT(WINAPI*)(void*, DWORD, BYTE*))vt(fx)[4])(fx, hWorld, refDesc);
     ((HRESULT(WINAPI*)(void*, DWORD, BYTE*))vt(fx)[5])(fx, tMain, refTech);
     refUsed = ((DWORD(WINAPI*)(void*, DWORD, DWORD))vt(fx)[62])(fx, hWorld, tMain);
-    int queryMismatch = 0;
+    int queryMismatch = 0, deviceReleaseMismatch = 0;
     // parameter block recorded before the render thread exists
     CALL0(fx, 73); { float col[4] = {1, 0.9f, 0.8f, 1}; CALL2(fx, 34, hColor, col); CALL2(fx, 30, hBlend, fbits(0.5f)); }
     DWORD blockA = ((DWORD(WINAPI*)(void*))vt(fx)[74])(fx);
@@ -370,6 +370,14 @@ int main(int argc, char** argv) {
         matLookProj(vp, 6 * cos(time * 0.3f), 5, 6 * sin(time * 0.3f), 1.2f);
         matLookProj(lvp, 4, 9, 3, 0.8f);
         CALL0(dev, 41);                                                   // BeginScene
+        // Keep queued device work in front of transient GetDevice references.
+        // Their releases must preserve the live device without a queue barrier.
+        for (int k = 0; k < 8; ++k) {
+            void* transient = NULL;
+            HRESULT got = CALL1(fx, 68, &transient);
+            if (FAILED(got) || transient != dev) deviceReleaseMismatch++;
+            if (transient && CALL0(transient, 2) == 0) deviceReleaseMismatch++;
+        }
         // shadow pass into the render-target texture
         CALL2(dev, 37, 0, srtSurf); CALL1(dev, 39, sz);
         { void* x = NULL; HRESULT h1 = CALL2(dev, 38, 0, &x); if (FAILED(h1) || x != srtSurf) mirrorMismatch++; if (x) CALL0(x, 2);
@@ -593,8 +601,11 @@ int main(int argc, char** argv) {
     double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / qf.QuadPart;
     printf("%s: %d frames in %.1f ms\n", rt ? "RT on" : "RT off", frames, ms);
     printf("cached query mismatches: %d\n", queryMismatch);
+    printf("device release mismatches: %d\n", deviceReleaseMismatch);
     printf("sysmem lock mismatches: %d, render-target mirror mismatches: %d, lock-only call mismatches: %d\n", sysMismatch, mirrorMismatch, lockedMismatch);
     if (rt) { char st[512]; rtStats(st, sizeof(st)); printf("rt stats: %s\n", st);
+        StatsF releases = (StatsF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestDeviceReleaseStats");
+        if (releases) { releases(st, sizeof(st)); printf("device release stats: %s\n", st); }
         typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
         if (s4) { s4(st, sizeof(st)); printf("rt v4 stats: %s\n", st); } }
     return 0;

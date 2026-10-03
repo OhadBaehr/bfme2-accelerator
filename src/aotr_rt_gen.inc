@@ -33,16 +33,7 @@ static DWORD __stdcall rt_dev_1(void* self) {   // AddRef [D ]
     }
     return ((DWORD(__stdcall*)(void*))g_rtO_dev[1])(self);
 }
-static DWORD __stdcall rt_dev_2(void* self) {   // Release [S ]
-    DWORD tid = __readfsdword(0x24);
-    if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
-        if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_dev[2])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
-        return ((DWORD(__stdcall*)(void*))g_rtO_dev[2])(self);
-    }
-    rtSyncNote(2, (DWORD)(ULONG_PTR)_ReturnAddress()); g_rtCurOp = 2;
-    rtDrain(); EnterCriticalSection(&g_rtExecCs); g_rtDirectScope++; DWORD r = ((DWORD(__stdcall*)(void*))g_rtO_dev[2])(self); g_rtDirectScope--; LeaveCriticalSection(&g_rtExecCs);
-    g_rtNSync++; g_rtSyncHist[2]++; return r;
-}
+static DWORD __stdcall rt_dev_2(void* self);   // Release (hand-written)
 static DWORD __stdcall rt_dev_3(void* self) {   // TestCooperativeLevel [L ]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
@@ -1772,7 +1763,7 @@ static DWORD __stdcall rt_tex_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_tex[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_tex[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_tex[2]; rr->op = 202; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_tex[2]; rr->op = 202; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_tex_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -1973,7 +1964,7 @@ static DWORD __stdcall rt_cube_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_cube[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_cube[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_cube[2]; rr->op = 232; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_cube[2]; rr->op = 232; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_cube_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -2198,7 +2189,7 @@ static DWORD __stdcall rt_vtex_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_vtex[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_vtex[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_vtex[2]; rr->op = 262; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_vtex[2]; rr->op = 262; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_vtex_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -2421,7 +2412,7 @@ static DWORD __stdcall rt_surf_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_surf[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_surf[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_surf[2]; rr->op = 292; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_surf[2]; rr->op = 292; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_surf_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -2567,7 +2558,7 @@ static DWORD __stdcall rt_vol_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_vol[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_vol[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_vol[2]; rr->op = 312; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_vol[2]; rr->op = 312; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_vol_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -2673,7 +2664,7 @@ static DWORD __stdcall rt_vb_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_vb[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_vb[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_vb[2]; rr->op = 332; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_vb[2]; rr->op = 332; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_vb_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -2790,7 +2781,7 @@ static DWORD __stdcall rt_ib_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_ib[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_ib[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_ib[2]; rr->op = 352; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_ib[2]; rr->op = 352; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_ib_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -2907,7 +2898,7 @@ static DWORD __stdcall rt_sb_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_sb[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_sb[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_sb[2]; rr->op = 372; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_sb[2]; rr->op = 372; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_sb_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -2969,7 +2960,7 @@ static DWORD __stdcall rt_q_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_q[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_q[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_q[2]; rr->op = 382; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_q[2]; rr->op = 382; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_q_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -3045,7 +3036,7 @@ static DWORD __stdcall rt_sc_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_sc[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_sc[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_sc[2]; rr->op = 392; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_sc[2]; rr->op = 392; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_sc_3(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4);   // Present (hand-written)
@@ -3129,7 +3120,7 @@ static DWORD __stdcall rt_vs_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_vs[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_vs[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_vs[2]; rr->op = 402; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_vs[2]; rr->op = 402; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_vs_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -3176,7 +3167,7 @@ static DWORD __stdcall rt_ps_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_ps[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_ps[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_ps[2]; rr->op = 412; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_ps[2]; rr->op = 412; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_ps_3(void* self, DWORD a0) {   // GetDevice [D v]
@@ -3223,7 +3214,7 @@ static DWORD __stdcall rt_decl_2(void* self) {   // Release [R ]
         return ((DWORD(__stdcall*)(void*))g_rtO_decl[2])(self);
     }
     ULONG c = ((ULONG(__stdcall*)(void*))g_rtO_decl[1])(self);    // temporary reference keeps it alive until the queued releases run
-    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_decl[2]; rr->op = 422; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
+    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_decl[2]; rr->op = 422; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self; rtCommit(rr, 0); }
     g_rtNRelease++; return c - 2;
 }
 static DWORD __stdcall rt_decl_3(void* self, DWORD a0) {   // GetDevice [D v]

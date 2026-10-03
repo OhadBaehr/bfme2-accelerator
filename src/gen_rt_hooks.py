@@ -18,7 +18,7 @@
 import os
 
 DEV = [
-    ("QueryInterface", "vv", "S"), ("AddRef", "", "D"), ("Release", "", "S"), ("TestCooperativeLevel", "", "L"),
+    ("QueryInterface", "vv", "S"), ("AddRef", "", "D"), ("Release", "", "X"), ("TestCooperativeLevel", "", "L"),
     ("GetAvailableTextureMem", "", "S"), ("EvictManagedResources", "", "A"), ("GetDirect3D", "v", "D"),
     ("GetDeviceCaps", "v", "D"), ("GetDisplayMode", "vv", "L"), ("GetCreationParameters", "v", "D"),
     ("SetCursorProperties", "vvv", "S"), ("SetCursorPosition", "vvv", "S"), ("ShowCursor", "v", "S"),
@@ -184,7 +184,7 @@ for cls, spec, base in CLASSES:
             # reads or writes - and the game releases a level surface after every use, so the stamp made the NEXT lock of the same
             # glyph / staging surface wait for the whole queue (v26 log: "it is named by a queued (call without an op)").
             touch = ""
-            emit("    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_%s[2]; rr->op = %d; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self;%s rtCommit(rr, 0); }" % (cls, op, touch))
+            emit("    for (int k = 0; k < 2; ++k) { RtRec* rr = rtAlloc(1, 0); rr->fn = g_rtO_%s[2]; rr->op = %d; rr->flags |= 2; rtArgs(rr)[0] = (DWORD)(ULONG_PTR)self;%s rtCommit(rr, 0); }" % (cls, op, touch))
             emit("    g_rtNRelease++; return c - 2;")
         elif kind == "A":
             # payload size

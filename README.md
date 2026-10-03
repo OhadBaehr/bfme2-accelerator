@@ -22,6 +22,8 @@ variable.
 
 - `aotr_rt.inc` and `aotr_rt_gen.inc` hold the render thread. Main-thread D3D9 and D3DX calls are recorded
   into a queue and replayed on a second thread.
+- `aotr_rt_release.inc` avoids device-release queue barriers where lifetime tracking permits it;
+  see [ownership rules and tests](docs/device-release.md).
 - `aotr_fastcrt.inc` replaces the hot `msvcr71` imports with SSE versions that return identical bytes.
 - `aotr_rlsort.inc` and `aotr_rlsort_algo.h` run the mesh render list sort without the reference-count traffic.
 - `aotr_logicspread.inc` leaves the engine's six logic calls per step in their stock order, each running
