@@ -112,14 +112,21 @@ static bool pbSegmentMissesBox(const float* mn, const float* mx, const float* p0
     }
     return false;
 }
-// bounds of every vertex the brute-force loop will read (4-wide loads: the 4th lane is the next vertex's x, ignored)
+// Read exactly three floats: the final indexed vertex need not have a fourth.
+static __forceinline __m128 pbLoadVertex(const float* v) { return _mm_set_ps(0.0f, v[2], v[1], v[0]); }
+// bounds of every vertex the brute-force loop will read
 static bool pbVertexBounds(const BYTE* model, LONG polys, float* mn, float* mx) {
     DWORD ih = *(DWORD*)(model + 0x2C), vh = *(DWORD*)(model + 0x30);
     if (!ih || !vh) return false;
     const WORD* idx = *(const WORD**)(ULONG_PTR)(ih + 0xC); const float* v = *(const float**)(ULONG_PTR)(vh + 0xC);
     if (!idx || !v) return false;
-    __m128 lo = _mm_loadu_ps(v + 3 * idx[0]), hi = lo;
-    for (LONG i = 1, n = polys * 3; i < n; ++i) { __m128 q = _mm_loadu_ps(v + 3 * idx[i]); lo = _mm_min_ps(lo, q); hi = _mm_max_ps(hi, q); }
+    __m128 lo = pbLoadVertex(v + 3 * idx[0]), hi = lo;
+    if (_mm_movemask_ps(_mm_cmpunord_ps(lo, lo))) return false;
+    for (LONG i = 1, n = polys * 3; i < n; ++i) {
+        __m128 q = pbLoadVertex(v + 3 * idx[i]);
+        if (_mm_movemask_ps(_mm_cmpunord_ps(q, q))) return false;
+        lo = _mm_min_ps(lo, q); hi = _mm_max_ps(hi, q);
+    }
     float a[4], b[4]; _mm_storeu_ps(a, lo); _mm_storeu_ps(b, hi);
     mn[0] = a[0]; mn[1] = a[1]; mn[2] = a[2]; mx[0] = b[0]; mx[1] = b[1]; mx[2] = b[2];
     return true;

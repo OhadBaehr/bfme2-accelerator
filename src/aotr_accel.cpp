@@ -30,6 +30,7 @@ extern "C" {
 static char g_dir[MAX_PATH] = "";
 static char kLogPath[MAX_PATH] = "";
 static volatile LONG g_engineHooks = 0;   // may this build's absolute addresses be patched?
+static bool g_bfme2Hooks = false;         // independently verified BFME2 1.06 hooks
 static void aotrSetDir(HMODULE self) {
     char p[MAX_PATH];
     DWORD n = GetModuleFileNameA(self, p, MAX_PATH);
@@ -2373,6 +2374,7 @@ static void rotateLog() {
 #include "aotr_drawgen.inc"
 #include "aotr_rlsort.inc"
 #include "aotr_rt.inc"
+#include "aotr_bfme2.inc"
 
 // ---------------------------------------------------------------- game-thread sampler v2 (RT build)
 // 100 samples/s of the game's render thread while frames are heavy (>= 30 ms) and the render thread is live.
@@ -2668,8 +2670,10 @@ static DWORD WINAPI initThread(LPVOID) {
                       GetModuleHandleA("msvcr71.dll") && GetModuleHandleA("mss32.dll");
         if (hit) {
             g_engineHooks = hit->engineHooks ? 1 : 0;
+            g_bfme2Hooks = textHash == 0x32667B9B && (DWORD)(ULONG_PTR)base == 0x00400000;
             logf("init: %s (.text %08X). %s", hit->name, textHash,
-                 g_engineHooks ? "Everything is installed." :
+                 g_engineHooks ? "Everything is installed." : g_bfme2Hooks ?
+                 "Portable accelerators plus independently checked BFME2 equivalence and mesh-picking hooks are eligible." :
                  "Only the parts that do not depend on this build's addresses are installed (render thread, heap, preshader cache, fast CRT).");
         } else if (family) {
             g_engineHooks = 0;
@@ -2753,6 +2757,7 @@ static DWORD WINAPI initThread(LPVOID) {
         rtInit();                                    // render thread: D3D9 + D3DX effect work moves to a worker thread
         installFastCrt(base);                        // exact fast memcpy / memset / strlen / strcmp / floor ... for the game's imports
         installCrashLog();                           // fatal exceptions: where, registers and the call chain into the log (diagnostic only)
+        if (g_bfme2Hooks) installBfme2Hooks();
 
         // --- anchored to absolute addresses inside one verified build
         if (g_engineHooks) {

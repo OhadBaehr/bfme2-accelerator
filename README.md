@@ -11,9 +11,9 @@ Instructions for playing with it are in [packaging/README.txt](packaging/README.
 beside the binaries. The rest of this page is about the source.
 
 Nothing is written into the game folder and `game.dat` on disk is never modified, so mod launchers and their
-checksums still pass. Every hook is located by wildcarded byte signature rather than a fixed address. A
-signature that is missing or ambiguous installs nothing and logs it, so the worst case after a game update is
-that the accelerator stays out of the way.
+checksums still pass. Portable hooks use signatures, vtables and named imports. Engine hooks use addresses
+for an identified executable build and verify instruction bytes before patching. Unrecognised engine
+builds receive only the portable hooks.
 
 ## What it changes
 
@@ -31,6 +31,8 @@ variable.
 - `aotr_drawgen.inc` generates the per-draw effect parameter writes rather than walking them.
 - `aotr_posewarm2.inc` updates skeleton trees on worker threads.
 - `aotr_equivmemo.inc` memoises `ThingTemplate` equivalence.
+- `aotr_bfme2.inc` independently ports equivalence caching and the mesh-picking box pretest to verified
+  BFME2 1.06. See [supported hooks, validation and switches](docs/bfme2-engine-hooks.md).
 - `aotr_audiolimit.inc` indexes the audio request limit check.
 - `aotr_pick.inc` and `aotr_rtmirror.inc` cover the mouse pick ray cast and the radar overlay mirrors.
 
