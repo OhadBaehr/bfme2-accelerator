@@ -66,10 +66,15 @@ build_crt_test2.bat        && crt_test2          :: fastcrt vs msvcr71, whole sc
 build_rlsort_test.bat      && rlsort_test        :: maps game.dat, runs the stock sort beside the replacement
                                                  :: pass the path if your install is not C:\AgeoftheRing
 build_audiolimit_test.bat  && audiolimit_test 0  :: indexed answer vs the walk, random list mutations
+build_production_hotpath_test.bat             :: reporting vs production counters, cache checks and allocation
 build_logicslicer_test.bat && logicslicer_test   :: slicer on vs off, operation sequence must be identical
 build_quat_test.bat        && quat_test          :: reads ../quatpairs.txt
 build_harness.bat          && rt_harness off 600 t600.txt
 ```
+
+`build_production_hotpath_test.bat` runs both modes using the shipping preshader/allocator functions
+and freshly compiled rpmalloc. Run it from an x86 Native Tools prompt, or set `AOTR_VCVARS32` to your
+`vcvars32.bat` path. Production removes report-only work in those paths while retaining cache checks.
 
 `rt_harness` renders a scene shaped like the game's own render pattern, reads every frame back and hashes it.
 `off` goes straight to D3D9, `on` runs the same frames through the render thread. Run both and the hashes

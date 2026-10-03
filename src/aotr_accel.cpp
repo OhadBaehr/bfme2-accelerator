@@ -45,7 +45,7 @@ static void aotrSetDir(HMODULE self) {
 static const char* aotrPath(char* out, const char* name) { wsprintfA(out, "%s\\%s", g_dir, name); return out; }
 
 // ---------------------------------------------------------------- production build switch
-// AOTR_PROD removes everything that exists only to be reported: the counters on the hot paths (85,000 queued
+// AOTR_PROD removes report-only work guarded by PSTAT: counters on selected hot paths (85,000 queued
 // records and 37,000 effect parameter writes per battle frame, three volatile stores each) and the background
 // threads that print them every few seconds. Nothing that changes what the game does is behind this switch -
 // every optimisation, and every self-check that keeps one honest, stays in. Install lines and the crash log stay
@@ -214,7 +214,7 @@ static DWORD hashD(DWORD prog, const double* a, int n){
 
 static int __stdcall my_preshader(DWORD a0,DWORD a1,DWORD a2,DWORD a3,DWORD a4,DWORD a5,DWORD a6,
                                   DWORD a7,DWORD a8,DWORD a9,DWORD a10,DWORD a11,DWORD a12,DWORD a13){
-    InterlockedIncrement(&g_preCount);
+    PSTAT(InterlockedIncrement(&g_preCount));
     if (g_preNoop) return 0;
     if (!g_pc) return o_preshader(a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
     // bank sizes (mask+1 doubles), the const bank (a3) is the varying input we key on
@@ -222,7 +222,7 @@ static int __stdcall my_preshader(DWORD a0,DWORD a1,DWORD a2,DWORD a3,DWORD a4,D
     int nout= (int)(a11 + 1);       // output bank size
     bool cacheable = !g_cOff && a3 && a5 && nin>0 && nin<=PRE_CAP && nout>0 && nout<=PRE_CAP;
     if (!cacheable) {
-        InterlockedIncrement(&g_cNocache);
+        PSTAT(InterlockedIncrement(&g_cNocache));
         return o_preshader(a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
     }
     double inbuf[PRE_CAP]; DWORD key; PreEnt* e; bool hit;
@@ -233,26 +233,29 @@ static int __stdcall my_preshader(DWORD a0,DWORD a1,DWORD a2,DWORD a3,DWORD a4,D
         hit = e->valid && e->prog==a0 && e->key==key && e->nin==nin && e->nout==nout
               && memcmp(e->in, inbuf, nin*8)==0;
     } __except(EXCEPTION_EXECUTE_HANDLER) {
-        InterlockedIncrement(&g_cNocache);
+        PSTAT(InterlockedIncrement(&g_cNocache));
         return o_preshader(a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
     }
 
+    // This counter schedules correctness checks; it must remain in production.
     bool verify = hit && ((InterlockedIncrement(&g_cSkip) & 31)==0);
     if (hit && !verify) {                        // fast path: replay cached output, skip interpreter
-        __try { memcpy((void*)a5, e->out, nout*8); InterlockedIncrement(&g_cHit); return 0; }
+        __try { memcpy((void*)a5, e->out, nout*8); PSTAT(InterlockedIncrement(&g_cHit)); return 0; }
         __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
 
-    LARGE_INTEGER t0,t1; QueryPerformanceCounter(&t0);
+#ifndef AOTR_PROD
+    LARGE_INTEGER t0; QueryPerformanceCounter(&t0);
+#endif
     int r = o_preshader(a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10,a11,a12,a13);
-    QueryPerformanceCounter(&t1);
-    InterlockedAdd64(&g_preTicks, t1.QuadPart - t0.QuadPart);
+    PSTAT(LARGE_INTEGER t1; QueryPerformanceCounter(&t1);
+          InterlockedAdd64(&g_preTicks, t1.QuadPart - t0.QuadPart));
     __try {
         if (hit) {                               // verify pass: compare fresh output to cached
-            InterlockedIncrement(&g_cHit);
-            if (memcmp(e->out,(const void*)a5, nout*8)!=0) { InterlockedIncrement(&g_cMismatch); InterlockedExchange(&g_cOff,1); }
+            PSTAT(InterlockedIncrement(&g_cHit));
+            if (memcmp(e->out,(const void*)a5, nout*8)!=0) { PSTAT(InterlockedIncrement(&g_cMismatch)); InterlockedExchange(&g_cOff,1); }
         } else {                                 // miss: store input+output
-            InterlockedIncrement(&g_cMiss);
+            PSTAT(InterlockedIncrement(&g_cMiss));
             e->prog=a0; e->key=key; e->nin=nin; e->nout=nout;
             memcpy(e->in, inbuf, nin*8); memcpy(e->out,(const void*)a5, nout*8); e->valid=true;
         }
@@ -532,7 +535,7 @@ static __forceinline void* aTag(void* base) {
 static void* __cdecl my_malloc(size_t n) {
     if (n > (size_t)-1 - AHDR) return 0;
     aThread();
-    InterlockedIncrement(&g_aAllocs);
+    PSTAT(InterlockedIncrement(&g_aAllocs));
     return aTag(rpmalloc(n + AHDR));
 }
 static void* __cdecl my_calloc(size_t a, size_t b) {
@@ -540,7 +543,7 @@ static void* __cdecl my_calloc(size_t a, size_t b) {
     if (a && n / a != b) return 0;             // multiply overflow
     if (n > (size_t)-1 - AHDR) return 0;
     aThread();
-    InterlockedIncrement(&g_aAllocs);
+    PSTAT(InterlockedIncrement(&g_aAllocs));
     void* p = aTag(rpmalloc(n + AHDR));
     if (p) memset(p, 0, n);
     return p;
@@ -552,13 +555,13 @@ static void* __cdecl my_realloc(void* p, size_t n) {
         aThread();
         return aTag(rprealloc((char*)p - AHDR, n + AHDR));
     }
-    InterlockedIncrement(&g_aForwarded);
+    PSTAT(InterlockedIncrement(&g_aForwarded));
     return o_realloc(p, n);                     // allocated before our hook -> leave with CRT
 }
 static void __cdecl my_free(void* p) {
     if (!p) return;
-    if (aOwns(p)) { aThread(); InterlockedIncrement(&g_aFrees); rpfree((char*)p - AHDR); }
-    else { InterlockedIncrement(&g_aForwarded); o_free(p); }
+    if (aOwns(p)) { aThread(); PSTAT(InterlockedIncrement(&g_aFrees)); rpfree((char*)p - AHDR); }
+    else { PSTAT(InterlockedIncrement(&g_aForwarded)); o_free(p); }
 }
 
 // Locate the writable IAT slot for base!dll.fn (the pointer to patch). We match by the
