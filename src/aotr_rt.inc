@@ -135,9 +135,33 @@ static RtXRef g_rtX[RT_XN];
 static BYTE g_rtXMark[RT_REFN];                                                            // 0 none, k = entry k-1 lives in this slot, 0xFF = more than one
 static LONG g_rtXN = 0;
 static volatile LONG g_rtNXHit = 0, g_rtNXSaved = 0, g_rtNXAdd = 0, g_rtNXEvict = 0;
+// Exact-object index, game thread only. Bucket links store array index + 1;
+// zero ends a chain. Explicit unlinking keeps eviction from leaving stale keys.
+#define RT_XHASHN 512
+static WORD g_rtXHead[RT_XHASHN], g_rtXNext[RT_XN];
+static __forceinline DWORD rtXHash(DWORD o) { return ((o >> 3) * 2654435761u) >> 23; }
+static __forceinline LONG rtXFind(DWORD o) {
+    for (WORD link = g_rtXHead[rtXHash(o)]; link; link = g_rtXNext[link - 1]) {
+        LONG i = link - 1;
+        if (g_rtX[i].obj == o) return i;
+    }
+    return -1;
+}
+static void rtXIndexRemove(LONG i) {
+    WORD* link = &g_rtXHead[rtXHash(g_rtX[i].obj)];
+    while (*link && *link != i + 1) link = &g_rtXNext[*link - 1];
+    if (*link) *link = g_rtXNext[i];
+    g_rtXNext[i] = 0;
+}
+static void rtXIndexAdd(LONG i) {
+    DWORD bucket = rtXHash(g_rtX[i].obj);
+    g_rtXNext[i] = g_rtXHead[bucket];
+    g_rtXHead[bucket] = (WORD)(i + 1);
+}
 static void rtXTouchSlow(DWORD o, DWORD seq, BYTE mark, WORD op) {
     if (mark != 0xFF) { RtXRef& x = g_rtX[mark - 1]; if (x.obj == o) { x.seq = seq; x.op = op; } return; }
-    for (LONG i = 0; i < g_rtXN; ++i) if (g_rtX[i].obj == o) { g_rtX[i].seq = seq; g_rtX[i].op = op; return; }
+    LONG i = rtXFind(o);
+    if (i >= 0) { g_rtX[i].seq = seq; g_rtX[i].op = op; }
 }
 // v26: a second table under an independent hash. Each table alone never misses a pending object (an object's slot
 // always carries a sequence number at least as new as its own), so "pending only if BOTH say so" never misses one
@@ -170,7 +194,8 @@ static void rtXRemark(DWORD slot) {                                             
 static WORD g_rtPendOp = 0xFFFF; static BYTE g_rtPendExact = 0;                             // why the last rtRefPending said "pending" (diagnostic)
 static bool rtRefPending(DWORD o) {                                                         // call with the exec lock held (game thread)
     DWORD slot = rtRefIdx(o), hashed = g_rtRefSeq[slot];
-    for (LONG i = 0; i < g_rtXN; ++i) if (g_rtX[i].obj == o) {
+    LONG i = rtXFind(o);
+    if (i >= 0) {
         g_rtX[i].lastUse = (DWORD)g_mkFrames; g_rtNXHit++;
         bool pend = rtSeqPending(g_rtX[i].seq);
         if (!pend && rtSeqPending(hashed)) g_rtNXSaved++;                                     // the shared slot alone would have said "wait"
@@ -187,13 +212,13 @@ static bool rtRefPending(DWORD o) {                                             
             DWORD age = (DWORD)g_mkFrames - g_rtX[i].lastUse;
             if (k < 0 || age > oldest) { k = i; oldest = age; }
         }
-        if (k >= 0) { DWORD os = rtRefIdx(g_rtX[k].obj); g_rtX[k].obj = 0; rtXRemark(os); g_rtNXEvict++; }
+        if (k >= 0) { DWORD os = rtRefIdx(g_rtX[k].obj); rtXIndexRemove(k); g_rtX[k].obj = 0; rtXRemark(os); g_rtNXEvict++; }
     }
     DWORD hashed2 = g_rtRefSeq2[rtRefIdx2(o)];
     bool p1 = rtSeqPending(hashed), p2 = rtSeqPending(hashed2);
     if (p1 && !p2) g_rtNH2Saved++;
     DWORD best = (p1 && p2) ? ((DWORD)(hashed - hashed2) < 0x80000000u ? hashed2 : hashed) : (p1 ? hashed2 : hashed);   // the older of two upper bounds is still an upper bound
-    if (k >= 0) { g_rtX[k].obj = o; g_rtX[k].seq = best; g_rtX[k].op = 0xFFFF; g_rtX[k].lastUse = (DWORD)g_mkFrames; rtXRemark(slot); g_rtNXAdd++; }
+    if (k >= 0) { g_rtX[k].obj = o; g_rtX[k].seq = best; g_rtX[k].op = 0xFFFF; g_rtX[k].lastUse = (DWORD)g_mkFrames; rtXIndexAdd(k); rtXRemark(slot); g_rtNXAdd++; }
     return p1 && p2;
 }
 #endif
