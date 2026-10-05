@@ -144,6 +144,7 @@ static __forceinline LONG rtXFind(DWORD o) {
     return -1;
 }
 static void rtXIndexRemove(LONG i) {
+    if (!g_rtX[i].obj) return;      // an unlinked entry: hashing 0 lands in bucket 0 and would cut a chain not ours
     WORD* link = &g_rtXHead[rtXHash(g_rtX[i].obj)];
     while (*link && *link != i + 1) link = &g_rtXNext[*link - 1];
     if (*link) *link = g_rtXNext[i];
