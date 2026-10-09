@@ -173,6 +173,7 @@ int main(int argc, char** argv) {
     if (argc < 4) { printf("usage: rt_harness off|on <frames> <out.txt>\n"); return 2; }
     bool rt = strcmp(argv[1], "on") == 0; int frames = atoi(argv[2]);
     bool optNoFpu = false, optBench = false, optWrap = false;
+    bool optFxWrap = false;                               // the effect value table's counter starts 64 drops short of its 32-bit wrap: the wrap falls inside the run, and the pictures must not change
     int optTex = 0;                                       // texture decoding on worker threads: 1 on, 2 on with every result checked against D3DX on a real texture
     bool optStream = false;                               // textures loaded by D3DX in the middle of every frame, drawn with at once, released (its own reference: run "off ... texstream" first)
     bool optPanId = false;                                // pan pictures, test: every picture shown goes through the GPU rectangle with the camera it was drawn from and must come out the same (with a tween mode)
@@ -188,7 +189,7 @@ int main(int argc, char** argv) {
     bool optPanSlow = false;                              // ... with frames as long as a battle's (30 to 49 ms): the game's pictures then come slower than a 60 Hz screen refreshes, and pictures go up on the screen's beat (v66)
     bool optTerrain = false;                              // ground-patch-style textures: created, level 0 written, the levels below made, drawn with, kept four frames (its own reference: run "off ... terrain" first)
     int optTween = 0; bool optPress = false;              // in-between frames: 4 frames drawn off screen, 1 every frame's stretch run again and compared, 2 draws left out, 8 shown late, 32 as in a slow game
-    for (int i = 4; i < argc; ++i) { if (!strcmp(argv[i], "nofpu")) optNoFpu = true; else if (!strcmp(argv[i], "bench")) optBench = true; else if (!strcmp(argv[i], "wrap")) optWrap = true;
+    for (int i = 4; i < argc; ++i) { if (!strcmp(argv[i], "nofpu")) optNoFpu = true; else if (!strcmp(argv[i], "bench")) optBench = true; else if (!strcmp(argv[i], "wrap")) optWrap = true; else if (!strcmp(argv[i], "fxwrap")) optFxWrap = true;
         else if (!strcmp(argv[i], "tweenoff")) optTween = 4; else if (!strcmp(argv[i], "tween")) optTween = 1 | 4; else if (!strcmp(argv[i], "tweenbad")) optTween = 1 | 2 | 4;
         else if (!strcmp(argv[i], "tweenlate")) optTween = 1 | 4 | 8; else if (!strcmp(argv[i], "tweenslow")) optTween = 32;
         else if (!strcmp(argv[i], "tweenpress")) { optTween = 1 | 4; optPress = true; }
@@ -218,6 +219,7 @@ int main(int argc, char** argv) {
         shroudRect = (ShroudF)GetProcAddress(ha, "AotrRtTestShroudRect"); if (!shroudRect) { printf("missing AotrRtTestShroudRect\n"); return 3; }
         radarOp = (RadarF)GetProcAddress(ha, "AotrRtTestRadarOp"); if (!radarOp) { printf("missing AotrRtTestRadarOp\n"); return 3; }
         if (optWrap) { typedef void (__cdecl* SeqF)(DWORD); SeqF sb = (SeqF)GetProcAddress(ha, "AotrRtTestSeqBase"); if (!sb) { printf("missing AotrRtTestSeqBase\n"); return 3; } sb(0xFFFFC000u); printf("queue sequence starts 16384 records before the 32-bit wrap\n"); }
+        if (optFxWrap) { typedef DWORD (__cdecl* FeF)(int, DWORD); FeF fe = (FeF)GetProcAddress(ha, "AotrRtTestFxEpoch"); if (!fe) { printf("missing AotrRtTestFxEpoch\n"); return 3; } fe(1, 0xFFFFFFC0u); printf("effect value counter starts 64 drops before the 32-bit wrap\n"); }
         if (!rtInstall || !rtStats || !rtScoped) { printf("missing test exports\n"); return 3; }
         Sleep(1500);                                      // let the DLL's own init thread finish its patching
         { typedef int (__cdecl* StF)(char*, int); StF st = (StF)GetProcAddress(ha, "AotrScreenClockSelfTest"); static char sb[512]; sb[0] = 0; if (st && optPanSim) { st(sb, sizeof(sb)); printf("%s\n", sb); } }
@@ -890,6 +892,8 @@ int main(int argc, char** argv) {
     if (optPcf) { static char pb[512]; pb[0] = 0;
         if (rt) { typedef void (__cdecl* PcF)(int, char*, int); PcF pc = (PcF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrShadowPcfTest"); if (pc) pc(-1, pb, sizeof(pb)); }
         printf("pcf: of %d frames the rectangle was the game's four-point sum in %d, the nine-point lookup in %d, neither in %d%s%s\n", frames, pcfFour, pcfNine, pcfNeither, pb[0] ? " | " : "", pb); }
+    if (rt && optFxWrap) { typedef DWORD (__cdecl* FeF)(int, DWORD); FeF fe = (FeF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestFxEpoch"); DWORD e = fe ? fe(0, 0) : 0;
+        printf("effect value counter: now %lu - %s\n", e, (e && e < 0xFFFFFFC0u) ? "it wrapped during the run" : "IT DID NOT WRAP"); }
     if (rt) { char st[512]; rtStats(st, sizeof(st)); printf("rt stats: %s\n", st);
         typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
         if (s4) { s4(st, sizeof(st)); printf("rt v4 stats: %s\n", st); }

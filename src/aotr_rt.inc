@@ -1350,9 +1350,11 @@ static volatile LONG g_rtNFxBlkInval = 0;
 static volatile LONG g_rtNFxSkip = 0, g_rtNFxKept = 0, g_rtNFxInval = 0;
 static volatile LONG g_rtNFxOffSlot[128], g_rtNFxOffWho[3];   // which setter, and from where: 0 other thread, 1 render thread off, 2 direct scope
 static volatile LONG g_rtNFxInvalWhy[4] = { 0, 0, 0, 0 };   // 0 off-queue call, 1 parameter block without a recording, 2 device reset, 3 other
+// (when the counter wraps the whole table is forgotten: an entry written 4 billion drops ago under the number the
+// counter starts again at would otherwise count as current. sizeof(g_rtFxV) is a pointer's four bytes.)
 static __forceinline void rtFxInvalAll(int why = 3) {
     if (!g_rtFxV) return;
-    g_rtNFxInvalWhy[why & 3]++; if (++g_rtFxEpoch == 0) { memset(g_rtFxV, 0, sizeof(g_rtFxV)); g_rtFxEpoch = 1; } g_rtNFxInval++; }
+    g_rtNFxInvalWhy[why & 3]++; if (++g_rtFxEpoch == 0) { memset(g_rtFxV, 0, (SIZE_T)RT_FXV * sizeof(RtFxVal)); g_rtFxEpoch = 1; } g_rtNFxInval++; }
 static __forceinline void rtFxForget(DWORD fx, DWORD h) {     // this handle's value is no longer known
     if (!g_rtFxV) return;
     DWORD i = ((fx >> 4) ^ (h * 2654435761u)) & (RT_FXV - 1);
@@ -2684,7 +2686,7 @@ static void rtInstall(void* fx) {                       // game render thread, f
         if (!th) { logf("rt: worker thread creation failed - render thread OFF."); return; }
         SetThreadPriority(th, THREAD_PRIORITY_ABOVE_NORMAL);
         rtPlaceWorker(th);
-        WaitForSingleObject(g_rtReady, 5000);
+        if (WaitForSingleObject(g_rtReady, 5000) != WAIT_OBJECT_0) logf("rt: the worker thread had not started after 5 s - going on; it takes the queue up when it runs.");
         CloseHandle(th);
         DWORD lo = g_d3d9Lo2, hi = g_d3d9Hi2;
         bool ok = true;
@@ -3052,6 +3054,23 @@ extern "C" __declspec(dllexport) void __cdecl AotrRtTestShroudRect(void* surf, D
 }
 extern "C" __declspec(dllexport) void __cdecl AotrRtTestSeqBase(DWORD base) {   // before install only: queue empty
     g_rtPH.seq = base; g_rtWH.execSeq = base; g_rtDrainSeq = base;
+}
+extern "C" __declspec(dllexport) DWORD __cdecl AotrRtTestFxEpoch(int set, DWORD v) { if (set) g_rtFxEpoch = v; return g_rtFxEpoch; }   // the effect value table's counter: read, or placed (before install)
+// The effect value table when its counter wraps (edge_test.exe): a table of its own, every entry written while the
+// counter stood at 1, the counter at its last number, one drop. No entry may count as current afterwards.
+extern "C" __declspec(dllexport) int __cdecl AotrRtTestFxWrap(char* out, int n) {
+    RtFxVal* keepV = g_rtFxV; DWORD keepE = g_rtFxEpoch; int fail = 0;
+    RtFxVal* t = (RtFxVal*)VirtualAlloc(NULL, (SIZE_T)RT_FXV * sizeof(RtFxVal), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!t) { if (out && n > 0) lstrcpynA(out, "FAIL  no memory for a table", n); return 1; }
+    for (int i = 0; i < RT_FXV; ++i) { t[i].fx = 0x1000 + i; t[i].h = 7; t[i].epoch = 1; t[i].nb = 4; }
+    g_rtFxV = t; g_rtFxEpoch = 0xFFFFFFFFu;
+    rtFxInvalAll();
+    int left = 0; for (int i = 0; i < RT_FXV; ++i) if (t[i].epoch == g_rtFxEpoch) ++left;
+    if (g_rtFxEpoch != 1 || left) fail = 1;
+    if (out && n > 200) wsprintfA(out, "%s  effect value table at its counter's wrap: the counter restarts at %u, and %d of %d old entries still count as current", fail ? "FAIL" : "ok  ", g_rtFxEpoch, left, RT_FXV);
+    g_rtFxV = keepV; g_rtFxEpoch = keepE;
+    VirtualFree(t, 0, MEM_RELEASE);
+    return fail;
 }
 extern "C" __declspec(dllexport) void __cdecl AotrRtTestThreads(char* out, int n) {   // tid, description, ideal cpu, cpu time
     int p = 0; out[0] = 0;

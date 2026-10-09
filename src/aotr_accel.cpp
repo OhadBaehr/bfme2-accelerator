@@ -552,6 +552,9 @@ static void* __cdecl my_calloc(size_t a, size_t b) {
 static void* __cdecl my_realloc(void* p, size_t n) {
     if (!p) return my_malloc(n);
     if (aOwns(p)) {
+        // msvcr71's realloc(p, 0) frees the block and returns NULL. With the tag's 16 bytes added, a zero used to
+        // go on as a request for 16 bytes: the caller got a block back that it takes to be gone.
+        if (!n) { aThread(); InterlockedIncrement(&g_aFrees); rpfree((char*)p - AHDR); return 0; }
         if (n > (size_t)-1 - AHDR) return 0;
         aThread();
         return aTag(rprealloc((char*)p - AHDR, n + AHDR));
@@ -563,6 +566,34 @@ static void __cdecl my_free(void* p) {
     if (!p) return;
     if (aOwns(p)) { aThread(); InterlockedIncrement(&g_aFrees); rpfree((char*)p - AHDR); }
     else { InterlockedIncrement(&g_aForwarded); o_free(p); }
+}
+// The four routines above at their edges, where msvcr71's answers are known (edge_test.exe shows them side by side).
+// Returns the number of failures; a line for every check goes to out.
+extern "C" __declspec(dllexport) int __cdecl AotrAllocTest(char* out, int n) {
+    int fail = 0, at = 0; if (out && n > 0) out[0] = 0;
+    #define AT_CHECK(cond, what) do { bool ok_ = (cond); if (!ok_) ++fail; if (out && at < n - 160) at += wsprintfA(out + at, "%s  %s\n", ok_ ? "ok  " : "FAIL", what); } while (0)
+    rpmalloc_initialize();                                   // in the game this was done at install; a second call changes nothing
+    unsigned char* a = (unsigned char*)my_calloc(8, 8);
+    bool zero = a != NULL; if (a) for (int i = 0; i < 64; ++i) if (a[i]) zero = false;
+    AT_CHECK(zero && aOwns(a), "calloc(8, 8): a block of ours, 64 zero bytes");
+    if (a) memset(a, 0x5A, 64);
+    unsigned char* b = a ? (unsigned char*)my_realloc(a, 4096) : NULL;
+    bool kept = b != NULL; if (b) for (int i = 0; i < 64; ++i) if (b[i] != 0x5A) kept = false;
+    AT_CHECK(kept && aOwns(b), "realloc to 4096 bytes: the first 64 kept");
+    void* big = b ? my_realloc(b, (size_t)-1) : (void*)1;
+    bool still = b != NULL; if (b) for (int i = 0; i < 64; ++i) if (b[i] != 0x5A) still = false;
+    AT_CHECK(big == NULL && still, "realloc to a size that cannot be: NULL, and the block is still whole");
+    LONG frees = g_aFrees;
+    void* gone = b ? my_realloc(b, 0) : (void*)1;
+    AT_CHECK(gone == NULL && g_aFrees == frees + 1, "realloc(block, 0): the block is freed and NULL comes back");
+    if (gone && gone != (void*)1) my_free(gone);
+    AT_CHECK(my_calloc((size_t)-1, 2) == NULL, "calloc whose product overflows: NULL");
+    AT_CHECK(my_malloc((size_t)-1) == NULL, "malloc of a size that cannot be: NULL");
+    void* m0 = my_malloc(0); AT_CHECK(m0 != NULL && aOwns(m0), "malloc(0): a block"); my_free(m0);
+    void* r0 = my_realloc(NULL, 0); AT_CHECK(r0 != NULL && aOwns(r0), "realloc(NULL, 0): a block, as malloc(0)"); my_free(r0);
+    my_free(NULL);
+    #undef AT_CHECK
+    return fail;
 }
 
 // Locate the writable IAT slot for base!dll.fn (the pointer to patch). We match by the
@@ -2879,7 +2910,7 @@ static DWORD WINAPI initThread(LPVOID) {
 
 // (the name of the release, and a build number that goes up with every build handed out: the first thing a log says)
 #define AOTR_RELEASE "2.0"
-#define AOTR_BUILDNO 72
+#define AOTR_BUILDNO 73
 #ifdef AOTR_PROD
     logf("init: BFME2 Accelerator " AOTR_RELEASE " (build %d) live. What is switched on is in bfme2_accel.ini beside the DLL; every part says in this log what it found and what it does.", AOTR_BUILDNO);
 #else

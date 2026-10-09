@@ -1,7 +1,7 @@
 # BFME2 Accelerator
 
 **Download: [BFME2-Accelerator-2.0.zip](https://github.com/OhadBaehr/bfme2-accelerator/raw/main/release/BFME2-Accelerator-2.0.zip)**
-(2.0, 9 October 2026 - unzip anywhere, run the loader, pick your game)
+(2.0, 10 October 2026 - unzip anywhere, run the loader, pick your game)
 
 An in-process accelerator for *The Lord of the Rings: The Battle for Middle-earth II* and *The Rise of the
 Witch-king* (EA SAGE engine, 2006), and for the mods built on them. It is a 32-bit DLL that a small loader
@@ -22,10 +22,14 @@ checksums still pass.
 
 | | |
 |---|---|
-| File | [`release/BFME2-Accelerator-2.0.zip`](https://github.com/OhadBaehr/bfme2-accelerator/raw/main/release/BFME2-Accelerator-2.0.zip) (1,097,923 bytes) |
-| SHA-256 | `14592DE0F4CF4BD10831DBD80DAE4209AA12013217D22A23B919A8FA277CC10E` |
+| File | [`release/BFME2-Accelerator-2.0.zip`](https://github.com/OhadBaehr/bfme2-accelerator/raw/main/release/BFME2-Accelerator-2.0.zip) (1,099,406 bytes) |
+| SHA-256 | `0D19AAD6F182DAC9EA23470E348B79F4CDCF977FF34CEB6564CB9EAB40DB6D82` |
 | Contains | `BFME2 Accelerator\` with `bfme2_accel_loader.exe`, `bfme2_accel.dll`, `bfme2_accel.ini`, `README.txt` |
-| Built from | this repository at the commit that added the zip (build 72) |
+| Built from | this repository at the commit that put this zip here (build 73) |
+
+Build 73 replaces the zip that stood here on 9 October (build 72, SHA-256 `14592DE0...`): `realloc(p, 0)` now frees
+the block as the game's C runtime does, and the table of effect values is cleared whole when its counter wraps.
+The log's first line names the build.
 
 `bfme2_accel_loader.exe` and `bfme2_accel.dll` are signed (SHA-256, timestamped). The certificate was made on
 the author's own computer, not issued by a certificate authority: it shows that the two files come
@@ -130,6 +134,8 @@ None of them needs the game to run; some need files from its install.
 cd src
 
 build_crt_test2.bat        && crt_test2          :: fastcrt vs msvcr71, whole scratch buffer compared
+build_edge_test.bat        && edge_test          :: the allocator at size zero beside msvcr71's answers; the
+                                                 :: effect value table when its counter wraps
 build_rlsort_test.bat      && rlsort_test        :: maps game.dat, runs the stock sort beside the replacement
                                                  :: pass the path if your install is not C:\AgeoftheRing
 build_audiolimit_test.bat  && audiolimit_test 0  :: indexed answer vs the walk, random list mutations
