@@ -1054,7 +1054,7 @@ static volatile LONG g_rtNFxOffSlot[128], g_rtNFxOffWho[3];   // which setter, a
 static volatile LONG g_rtNFxInvalWhy[4] = { 0, 0, 0, 0 };   // 0 off-queue call, 1 parameter block without a recording, 2 device reset, 3 other
 static __forceinline void rtFxInvalAll(int why = 3) {
     if (!g_rtFxV) return;
-    g_rtNFxInvalWhy[why & 3]++; if (++g_rtFxEpoch == 0) { memset(g_rtFxV, 0, sizeof(g_rtFxV)); g_rtFxEpoch = 1; } g_rtNFxInval++; }
+    g_rtNFxInvalWhy[why & 3]++; if (++g_rtFxEpoch == 0) { memset(g_rtFxV, 0, RT_FXV * sizeof(*g_rtFxV)); g_rtFxEpoch = 1; } g_rtNFxInval++; }
 static __forceinline void rtFxForget(DWORD fx, DWORD h) {     // this handle's value is no longer known
     if (!g_rtFxV) return;
     DWORD i = ((fx >> 4) ^ (h * 2654435761u)) & (RT_FXV - 1);
@@ -2102,7 +2102,7 @@ static void rtInitBody() {
     g_rtArena = (BYTE*)VirtualAlloc(NULL, RT_ARENA_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (g_rtBuf) memset(g_rtBuf, 0, RT_BUF_SIZE);
     if (g_rtArena) memset(g_rtArena, 0, 8u << 20);
-    if (!g_rtBuf || !g_rtWake || !g_rtDrained || !g_rtPresented || !g_rtReady) { g_rtTried = true; logf("rt: allocation failed - render thread OFF."); return; }
+    if (!g_rtFxBlk || !g_rtBuf || !g_rtQ || !g_rtQStr || !g_rtPBReal || !g_rtPBLive || !g_rtArena || !g_rtWake || !g_rtDrained || !g_rtPresented || !g_rtReady) { g_rtTried = true; logf("rt: allocation failed - render thread OFF."); return; }
     if (!rtHookTable(fvt, 79, g_rtO_fx, g_rtH_fx, "ID3DXEffect", g_dxLo, g_dxHi)) { g_rtTried = true; return; }
     // D3DX global functions imported by the game module that touch the device
     HMODULE hGame = GetModuleHandleA("game.dat"); if (!hGame) hGame = GetModuleHandleA(NULL);
@@ -2172,8 +2172,9 @@ static void rtInstall(void* fx) {                       // game render thread, f
         if (!th) { logf("rt: worker thread creation failed - render thread OFF."); return; }
         SetThreadPriority(th, THREAD_PRIORITY_ABOVE_NORMAL);
         rtPlaceWorker(th);
-        WaitForSingleObject(g_rtReady, 5000);
+        DWORD ready = WaitForSingleObject(g_rtReady, 5000);
         CloseHandle(th);
+        if (ready != WAIT_OBJECT_0) { logf("rt: worker readiness failed (%lu) - render thread OFF.", ready); return; }
         DWORD lo = g_d3d9Lo2, hi = g_d3d9Hi2;
         bool ok = true;
         ok = ok && rtHookTable(*(void***)tex,  22, g_rtO_tex,  g_rtH_tex,  "Texture",       lo, hi);
