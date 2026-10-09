@@ -100,3 +100,16 @@ the Age of the Ring team. Those files are left out of this repository. A build h
 in `src/art/placeholder/` instead, so the loader you get shows three plain title cards.
 
 This is an unofficial fan project with no connection to Electronic Arts.
+
+### Reproducible MSVC build and regression tests
+
+With Visual Studio 2022 and the x86 C++ workload installed, run `./build.ps1`
+from PowerShell (or `./build.ps1 -Report` for a diagnostic build). This discovers
+MSVC with vswhere, compiles rpmalloc from source, builds the DLL and harness with
+`/W3 /WX`, and runs allocator/cache regression tests. Outputs stay in
+`build/accel-prod` or `build/accel-report`; no game installation is changed.
+`-CrtPath 'C:\path\to\msvcr71.dll'` additionally copies that runtime into the
+isolated output directory and runs the existing CRT differential test.
+
+The original batch scripts and injector entry point remain available. See
+[contribution notes](CONTRIBUTION.md) for the fixes and validation limits.

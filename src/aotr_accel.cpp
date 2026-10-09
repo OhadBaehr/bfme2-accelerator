@@ -547,6 +547,9 @@ static void* __cdecl my_calloc(size_t a, size_t b) {
 static void* __cdecl my_realloc(void* p, size_t n) {
     if (!p) return my_malloc(n);
     if (aOwns(p)) {
+        // Preserve msvcr71 realloc(p, 0): release the allocation and return NULL.
+        // Adding the ownership header first would turn zero into a nonzero request.
+        if (!n) { aThread(); InterlockedIncrement(&g_aFrees); rpfree((char*)p - AHDR); return NULL; }
         if (n > (size_t)-1 - AHDR) return 0;
         aThread();
         return aTag(rprealloc((char*)p - AHDR, n + AHDR));
