@@ -1,4 +1,4 @@
-// rt_harness.cpp - offline correctness test for the render thread (RT) in aotr_accel.dll.
+// rt_harness.cpp - offline correctness test for the render thread (RT) in bfme2_accel.dll.
 //   rt_harness off <frames> <out.txt>   render with direct D3D9/D3DX calls
 //   rt_harness on  <frames> <out.txt>   same frames with the render thread installed
 // Every frame is read back (StretchRect -> GetRenderTargetData -> LockRect) and hashed; the two runs must
@@ -6,7 +6,7 @@
 // "_CreateShadowMap" technique, Begin(flags=6) state blocks, parameter blocks, SetRawValue world matrices
 // and bone palettes, a preshader, dynamic vertex buffer DISCARD locks, per-frame texture LockRect updates,
 // DrawPrimitiveUP / DrawIndexedPrimitiveUP, application state blocks and D3DX texture creation mid-run.
-// Uses DXVK's d3d9.dll placed next to the exe and the system d3dx9_27.dll. 32-bit, raw vtables.
+// Uses local or system D3D9 and the system d3dx9_27.dll. 32-bit, raw vtables.
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,11 +54,11 @@ static const char kFx[] =
 static void matIdent(float* m) { memset(m, 0, 64); m[0] = m[5] = m[10] = m[15] = 1; }
 static void matMul(const float* a, const float* b, float* o) { float t[16]; for (int r = 0; r < 4; ++r) for (int c = 0; c < 4; ++c) { float s = 0; for (int k = 0; k < 4; ++k) s += a[r*4+k] * b[k*4+c]; t[r*4+c] = s; } memcpy(o, t, 64); }
 static void matWorld(float* m, float x, float y, float z, float ang, float sc) {
-    matIdent(m); float c = cos(ang) * sc, s = sin(ang) * sc; m[0] = c; m[2] = -s; m[5] = sc; m[8] = s; m[10] = c; m[12] = x; m[13] = y; m[14] = z; }
+    matIdent(m); float c = static_cast<float>(cos(ang) * sc), s = static_cast<float>(sin(ang) * sc); m[0] = c; m[2] = -s; m[5] = sc; m[8] = s; m[10] = c; m[12] = x; m[13] = y; m[14] = z; }
 static void matLookProj(float* out, float ex, float ey, float ez, float fovScale) {
     // simple look-at toward origin (LH) * perspective
-    float zx = -ex, zy = -ey, zz = -ez; float zl = sqrt(zx*zx + zy*zy + zz*zz); zx /= zl; zy /= zl; zz /= zl;
-    float xx = zz, xy = 0, xz = -zx; float xl = sqrt(xx*xx + xz*xz); xx /= xl; xz /= xl;
+    float zx = -ex, zy = -ey, zz = -ez; float zl = static_cast<float>(sqrt(zx*zx + zy*zy + zz*zz)); zx /= zl; zy /= zl; zz /= zl;
+    float xx = zz, xy = 0, xz = -zx; float xl = static_cast<float>(sqrt(xx*xx + xz*xz)); xx /= xl; xz /= xl;
     float yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
     float v[16] = { xx, yx, zx, 0,  xy, yy, zy, 0,  xz, yz, zz, 0,
                     -(xx*ex + xy*ey + xz*ez), -(yx*ex + yy*ey + yz*ez), -(zx*ex + zy*ey + zz*ez), 1 };
@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
     typedef void (__cdecl* ShroudF)(void*, DWORD, DWORD, DWORD, DWORD, const BYTE*, DWORD); ShroudF shroudRect = shroudRectDirect;
     typedef void (__cdecl* RadarF)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD); RadarF radarOp = radarDirect;
     if (rt) {
-        HMODULE ha = LoadLibraryA("bfme2_accel.new.dll"); if (!ha) { printf("no bfme2_accel.new.dll (%lu)\n", GetLastError()); return 3; }
+        HMODULE ha = LoadLibraryA("bfme2_accel.dll"); if (!ha) { printf("no bfme2_accel.dll (%lu)\n", GetLastError()); return 3; }
         rtInstall = (InstallF)GetProcAddress(ha, "AotrRtTestInstall"); rtStats = (StatsF)GetProcAddress(ha, "AotrRtTestStats");
         rtScoped = (ScopedF)GetProcAddress(ha, "AotrRtTestScopedD3DX");
         rtToggle = (ToggleF)GetProcAddress(ha, "AotrRtTestToggle");
@@ -159,7 +159,7 @@ int main(int argc, char** argv) {
         radarOp = (RadarF)GetProcAddress(ha, "AotrRtTestRadarOp"); if (!radarOp) { printf("missing AotrRtTestRadarOp\n"); return 3; }
         if (optWrap) { typedef void (__cdecl* SeqF)(DWORD); SeqF sb = (SeqF)GetProcAddress(ha, "AotrRtTestSeqBase"); if (!sb) { printf("missing AotrRtTestSeqBase\n"); return 3; } sb(0xFFFFC000u); printf("queue sequence starts 16384 records before the 32-bit wrap\n"); }
         if (!rtInstall || !rtStats || !rtScoped) { printf("missing test exports\n"); return 3; }
-        Sleep(1500);                                      // let the DLL's own init thread finish its patching
+        // AotrRtTestInstall explicitly starts the renderer in this test process.
     }
     typedef void* (WINAPI* Create9F)(UINT);
     typedef HRESULT (WINAPI* CreateEffectF)(void*, const char*, UINT, void*, void*, DWORD, void*, void**, void**);
@@ -201,7 +201,7 @@ int main(int argc, char** argv) {
     const float n[6][3] = {{0,0,-1},{0,0,1},{-1,0,0},{1,0,0},{0,1,0},{0,-1,0}};
     for (int f = 0; f < 6; ++f) {
         float nx = n[f][0], ny = n[f][1], nz = n[f][2];
-        float ux = ny ? 1 : (nz ? 1 : 0), uy = 0, uz = ny ? 0 : (nx ? 1 : 0);
+        float ux = ny ? 1.0f : (nz ? 1.0f : 0.0f), uy = 0, uz = ny ? 0.0f : (nx ? 1.0f : 0.0f);
         float wx = ny*uz - nz*uy, wy = nz*ux - nx*uz, wz = nx*uy - ny*ux;
         for (int k = 0; k < 4; ++k) { float a = (k == 0 || k == 3) ? -1.0f : 1.0f, b = (k < 2) ? -1.0f : 1.0f;
             V& q = cube[vi + k]; q.x = nx + a*ux + b*wx; q.y = ny + a*uy + b*wy; q.z = nz + a*uz + b*wz; q.nx = nx; q.ny = ny; q.nz = nz; q.u = (a+1)/2; q.v = (b+1)/2; }
@@ -266,7 +266,7 @@ int main(int argc, char** argv) {
 
     printf("resources ready (x87 control word now %04x), parameter block handle form %08lX\n", _control87(0, 0) & 0xFFFF, blockA);
     if (rt) { int ok = rtInstall(dev, fx); printf("render thread install: %d\n", ok); if (!ok) return 7;
-        { typedef void (__cdecl* AnyF)(int); AnyF any = (AnyF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestAtlasAny"); if (any) any(1); }
+        { typedef void (__cdecl* AnyF)(int); AnyF any = (AnyF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestAtlasAny"); if (any) any(1); }
         D3DXCreateTexture = (CreateTextureF)rtScoped("D3DXCreateTexture"); D3DXFilterTexture = (FilterTextureF)rtScoped("D3DXFilterTexture"); }
     // a second parameter block recorded through the render thread
     CALL0(fx, 73); { float tint[4] = {0.9f, 1.0f, 1.1f, 1}; CALL2(fx, 34, hTint, tint); }
@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 1000000; ++i) ((HRESULT(WINAPI*)(void*, DWORD, const void*, UINT, UINT))vt(fx)[78])(fx, hWorld, m, 0, 64);
         QueryPerformanceCounter(&b1);
         printf("bench SetRawValue(64B): %.1f ns/call\n", (double)(b1.QuadPart - b0.QuadPart) * 1e9 / bf.QuadPart / 1000000);
-        { typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
+        { typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestStatsV4");
           char st[512]; if (s4) { s4(st, sizeof(st)); printf("  after SetRawValue: %s\n", st); } }
         { // parameter writes that keep changing: the value cache misses every time
           float mm[16]; for (int k = 0; k < 16; ++k) mm[k] = (float)k;
@@ -305,7 +305,7 @@ int main(int argc, char** argv) {
           float mm[16]; for (int k = 0; k < 16; ++k) mm[k] = (float)k;
           float v4[4] = {1, 2, 3, 4};
           LONGLONG ticks = 0; LONG calls = 0;
-          typedef void (__cdecl* HoldF)(int); HoldF hold = (HoldF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestHold");
+          typedef void (__cdecl* HoldF)(int); HoldF hold = (HoldF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestHold");
           for (int burst = 0; burst < 24; ++burst) {
               if (hold) hold(1);                                                                      // worker parked: the enqueue path alone
               QueryPerformanceCounter(&b0);
@@ -327,9 +327,9 @@ int main(int argc, char** argv) {
               CALL2(dev, 32, cap, sys);                                                               // drain, untimed
           }
           printf("bench game-like effect run (16 parameter writes + 2 device calls), enqueue only: %.1f ns/call\n", (double)ticks * 1e9 / bf.QuadPart / calls); }
-        { typedef void (__cdecl* CpuF)(char*, int); CpuF cf = (CpuF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestCpu");
+        { typedef void (__cdecl* CpuF)(char*, int); CpuF cf = (CpuF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestCpu");
           char st[1024]; if (cf) { cf(st, sizeof(st)); printf("  cpus during the first three benches: %s\n", st); } }
-        { typedef void (__cdecl* ThrF)(char*, int); ThrF tf = (ThrF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestThreads");
+        { typedef void (__cdecl* ThrF)(char*, int); ThrF tf = (ThrF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestThreads");
           static char st[8192]; if (tf) { tf(st, sizeof(st)); printf("  threads:\n%s", st); } }
         BYTE d[44];
         QueryPerformanceCounter(&b0);
@@ -344,13 +344,17 @@ int main(int argc, char** argv) {
         CALL2(dev, 32, cap, sys);                                               // sync point: wait for the worker to finish the backlog
         QueryPerformanceCounter(&b1);
         printf("bench drain of the backlog: %.1f ms\n", (double)(b1.QuadPart - b0.QuadPart) * 1e3 / bf.QuadPart);
-        { typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
+        { typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestStatsV4");
           char st[512]; if (s4) { s4(st, sizeof(st)); printf("bench wait stats: %s\n", st); } }
         return 0;
     }
     printf("entering frame loop\n");
     g_vehOn = 1;
-    FILE* out = fopen(argv[3], "w");
+    FILE* out = NULL;
+    if (fopen_s(&out, argv[3], "w") != 0 || !out) {
+        fprintf(stderr, "Cannot open frame output: %s\n", argv[3]);
+        return 6;
+    }
     LARGE_INTEGER qf, t0, t1; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&t0);
     void* extraTex = NULL;
     for (int fr = 0; fr < frames; ++fr) {
@@ -367,7 +371,7 @@ int main(int argc, char** argv) {
           if (hl != hLong || hv != hMatVal) queryMismatch++; }
         if (rtToggle && fr > 0 && fr % 50 == 0) rtToggle((fr / 50) % 2 == 0);   // switch the render thread off/on every 50 frames
         float vp[16], lvp[16], world[16], bones[48];
-        matLookProj(vp, 6 * cos(time * 0.3f), 5, 6 * sin(time * 0.3f), 1.2f);
+        matLookProj(vp, static_cast<float>(6 * cos(time * 0.3f)), 5, static_cast<float>(6 * sin(time * 0.3f)), 1.2f);
         matLookProj(lvp, 4, 9, 3, 0.8f);
         CALL0(dev, 41);                                                   // BeginScene
         // shadow pass into the render-target texture
@@ -381,8 +385,8 @@ int main(int argc, char** argv) {
         CALL1(fx, 58, tShadow); UINT np = 0; CALL2(fx, 63, &np, 6); CALL1(fx, 64, 0);
         CALL2(fx, 38, hLVP, lvp);
         for (int o = 0; o < 20; ++o) {
-            matWorld(world, (o % 5) * 2.2f - 4.4f, 0.5f * sin(time + o), (o / 5) * 2.2f - 3.3f, time + o * 0.3f, 0.6f);
-            for (int b = 0; b < 4; ++b) { memset(bones + b*12, 0, 12*sizeof(float)); bones[b*12] = bones[b*12+5] = bones[b*12+10] = 1; bones[b*12+3] = 0.1f * sin(time * (b + 1)); }
+            matWorld(world, (o % 5) * 2.2f - 4.4f, static_cast<float>(0.5f * sin(time + o)), (o / 5) * 2.2f - 3.3f, time + o * 0.3f, 0.6f);
+            for (int b = 0; b < 4; ++b) { memset(bones + b*12, 0, 12*sizeof(float)); bones[b*12] = bones[b*12+5] = bones[b*12+10] = 1; bones[b*12+3] = static_cast<float>(0.1f * sin(time * (b + 1))); }
             ((HRESULT(WINAPI*)(void*, DWORD, const void*, UINT, UINT))vt(fx)[78])(fx, hWorld, world, 0, 64);
             ((HRESULT(WINAPI*)(void*, DWORD, const void*, UINT, UINT))vt(fx)[78])(fx, hBones, bones, 0, 48);
             CALL0(fx, 65);
@@ -408,7 +412,7 @@ int main(int argc, char** argv) {
           CALL2(fx, 30, hLong, fbits(0.9f + 0.1f * (float)cos(time))); CALL2(fx, 30, hMatVal, fbits(0.95f + 0.05f * (float)sin(time * 1.3f))); }
         blockC = ((DWORD(WINAPI*)(void*))vt(fx)[74])(fx);
         CALL1(fx, 75, (fr % 3 == 0) ? blockC : ((fr & 1) ? blockA : blockB));
-        if (rt && argc > 4 && !strcmp(argv[4], "capture")) { typedef void (__cdecl* CapF)(int); static CapF cap = (CapF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestCaptureTick"); if (cap) cap(fr); }
+        if (rt && argc > 4 && !strcmp(argv[4], "capture")) { typedef void (__cdecl* CapF)(int); static CapF cap = (CapF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestCaptureTick"); if (cap) cap(fr); }
         if (fr % 3 == 0) { LOCKED_RECT lr; if (SUCCEEDED(CALL3(atlasSurf, 13, &lr, 0, 0))) {
             for (int k = 0; k < 4; ++k) { int tx = ((fr / 3 + k * 3) & 7) * 32, ty = ((fr / 3 * 5 + k) & 7) * 32;
                 for (int y = 0; y < 32; ++y) for (int x = 0; x < 32; ++x) ((WORD*)((BYTE*)lr.pBits + (ty + y) * lr.Pitch))[tx + x] = (WORD)(0x8000u | ((fr * 7 + x * 3 + k) & 0x7FFF)); }
@@ -422,11 +426,11 @@ int main(int argc, char** argv) {
             D3DXFilterTexture(atlas2Tex, NULL, 0, 5); }
         CALL2(fx, 52, hDiff, (fr & 1) ? ((fr & 2) ? atlas2Tex : atlasTex) : tex); CALL2(fx, 52, hShadow, srt);
         CALL2(fx, 38, hVP, vp); CALL2(fx, 38, hLVP, lvp);
-        CALL2(fx, 30, hBlend, fbits(0.5f + 0.25f * sin(time)));            // preshader input changes every frame
+        CALL2(fx, 30, hBlend, fbits(static_cast<float>(0.5f + 0.25f * sin(time))));            // preshader input changes every frame
         for (int o = 0; o < 20; ++o) {
-            matWorld(world, (o % 5) * 2.2f - 4.4f, 0.5f * sin(time + o), (o / 5) * 2.2f - 3.3f, time + o * 0.3f, 0.6f);
-            for (int b = 0; b < 4; ++b) { memset(bones + b*12, 0, 12*sizeof(float)); bones[b*12] = bones[b*12+5] = bones[b*12+10] = 1; bones[b*12+3] = 0.1f * sin(time * (b + 1)); }
-            float col[4] = {0.5f + 0.5f * sin(o + time), 0.7f, 0.5f + 0.5f * cos(o * 0.7f), 1};
+            matWorld(world, (o % 5) * 2.2f - 4.4f, static_cast<float>(0.5f * sin(time + o)), (o / 5) * 2.2f - 3.3f, time + o * 0.3f, 0.6f);
+            for (int b = 0; b < 4; ++b) { memset(bones + b*12, 0, 12*sizeof(float)); bones[b*12] = bones[b*12+5] = bones[b*12+10] = 1; bones[b*12+3] = static_cast<float>(0.1f * sin(time * (b + 1))); }
+            float col[4] = {static_cast<float>(0.5f + 0.5f * sin(o + time)), 0.7f, static_cast<float>(0.5f + 0.5f * cos(o * 0.7f)), 1};
             ((HRESULT(WINAPI*)(void*, DWORD, const void*, UINT, UINT))vt(fx)[78])(fx, hWorld, world, 0, 64);
             ((HRESULT(WINAPI*)(void*, DWORD, const void*, UINT, UINT))vt(fx)[78])(fx, hBones, bones, 0, 48);
             CALL2(fx, 34, hColor, col);
@@ -445,7 +449,7 @@ int main(int argc, char** argv) {
         // particles through a dynamic vertex buffer (DISCARD)
         { void* pv = NULL; CALL4(dvb, 11, 0, 0, &pv, 0x2000);
           struct PV { float x, y, z, w; DWORD c; }* v = (PV*)pv;
-          for (int k = 0; k < 100; ++k) { float cx = 320 + 200 * sin(time * 0.7f + k), cy = 240 + 150 * cos(time * 0.9f + k * 1.3f); DWORD c = 0x80000000 | (k * 2 << 16) | (255 - k);
+          for (int k = 0; k < 100; ++k) { float cx = static_cast<float>(320 + 200 * sin(time * 0.7f + k)), cy = static_cast<float>(240 + 150 * cos(time * 0.9f + k * 1.3f)); DWORD c = 0x80000000 | (k * 2 << 16) | (255 - k);
             PV quad[6] = { {cx-6,cy-6,0,1,c}, {cx+6,cy-6,0,1,c}, {cx-6,cy+6,0,1,c}, {cx+6,cy-6,0,1,c}, {cx+6,cy+6,0,1,c}, {cx-6,cy+6,0,1,c} };
             memcpy(v + k * 6, quad, sizeof(quad)); }
           CALL0(dvb, 12); }
@@ -453,7 +457,7 @@ int main(int argc, char** argv) {
         CALL1(dev, 89, 0x4 | 0x40); CALL4(dev, 100, 0, dvb, 0, 20); CALL3(dev, 81, 4, 0, 200);
         { void* pv = NULL; CALL4(dvb, 11, 600 * 20 / 2, 300 * 20, &pv, 0x1000);         // NOOVERWRITE: second half
           struct PV { float x, y, z, w; DWORD c; }* v = (PV*)pv;
-          for (int k = 0; k < 50; ++k) { float cx = 100 + 8.0f * k, cy = 60 + 20 * sin(time * 2 + k); DWORD c = 0xC000FF00 | (k * 4);
+          for (int k = 0; k < 50; ++k) { float cx = 100 + 8.0f * k, cy = static_cast<float>(60 + 20 * sin(time * 2 + k)); DWORD c = 0xC000FF00 | (k * 4);
             PV quad[6] = { {cx-3,cy-3,0,1,c}, {cx+3,cy-3,0,1,c}, {cx-3,cy+3,0,1,c}, {cx+3,cy-3,0,1,c}, {cx+3,cy+3,0,1,c}, {cx-3,cy+3,0,1,c} };
             memcpy(v + k * 6, quad, sizeof(quad)); }
           CALL0(dvb, 12); }
@@ -461,7 +465,7 @@ int main(int argc, char** argv) {
         CALL2(dev, 57, 27, 0);
         // indexed user-pointer lines
         { struct LV { float x, y, z, w; DWORD c; } lv[5]; WORD li[8] = {0,1, 1,2, 2,3, 3,4};
-          for (int k = 0; k < 5; ++k) { lv[k].x = 20.0f + k * 40; lv[k].y = 400 + 30 * sin(time + k); lv[k].z = 0; lv[k].w = 1; lv[k].c = 0xFFFFFF00; }
+          for (int k = 0; k < 5; ++k) { lv[k].x = 20.0f + k * 40; lv[k].y = static_cast<float>(400 + 30 * sin(time + k)); lv[k].z = 0; lv[k].w = 1; lv[k].c = 0xFFFFFF00; }
           CALL8(dev, 84, 2, 0, 5, 4, li, 101, lv, sizeof(LV)); }
         // D3DX creation and mip filtering in the middle of a frame
         if (fr == 10) { D3DXCreateTexture(dev, 64, 64, 0, 0, 21, 1, &extraTex); if (extraTex) { LOCKED_RECT lr; CALL4(extraTex, 19, 0, &lr, 0, 0); memset(lr.pBits, 0x7F, 64 * 64 * 4); CALL1(extraTex, 20, 0); D3DXFilterTexture(extraTex, NULL, 0, 0xFFFFFFFF); } }
@@ -595,7 +599,7 @@ int main(int argc, char** argv) {
     printf("cached query mismatches: %d\n", queryMismatch);
     printf("sysmem lock mismatches: %d, render-target mirror mismatches: %d, lock-only call mismatches: %d\n", sysMismatch, mirrorMismatch, lockedMismatch);
     if (rt) { char st[512]; rtStats(st, sizeof(st)); printf("rt stats: %s\n", st);
-        typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
+        typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestStatsV4");
         if (s4) { s4(st, sizeof(st)); printf("rt v4 stats: %s\n", st); } }
     return 0;
 }
