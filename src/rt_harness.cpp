@@ -128,13 +128,73 @@ static LONG CALLBACK harnessVeh(EXCEPTION_POINTERS* ep) {
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
+// the waits: what the window got, and when
+static volatile LONG g_hMsg77 = 0, g_hMsg78 = 0, g_hMsg78InWait = -1; static LONG (__cdecl* g_hWaiting)() = NULL;
+static LRESULT CALLBACK hWndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if (m == WM_USER + 77) { InterlockedIncrement(&g_hMsg77); return 0; }
+    if (m == WM_USER + 78) { g_hMsg78InWait = g_hWaiting ? g_hWaiting() : -2; InterlockedIncrement(&g_hMsg78); return 0; }
+    return DefWindowProcA(h, m, w, l);
+}
+static DWORD WINAPI hSender(LPVOID hwnd) { Sleep(60); SendMessageA((HWND)hwnd, WM_USER + 78, 0, 0); return 0; }
+static volatile LONG g_hWd = 0;
+static DWORD WINAPI hWdProc(LPVOID) { Sleep(20000); if (g_hWd) { printf("HUNG: the pump test did not come back in 20 s\n"); fflush(stdout); ExitProcess(9); } return 0; }
+// (pcf) the game's shadow lookup as its source must have been: the game's compiler (d3dx9_27) makes the very instructions of the game's shaders from it
+static const char kFxPcf[] =
+    "struct ShadowSetup { float4x4 WorldToShadow; float4 Zero_Zero_OneOverMapSize_OneOverMapSize; };\n"
+    "ShadowSetup ShadowInfo;\n"
+    "texture ShadowMap;\n"
+    "sampler2D ShadowMapSampler = sampler_state { Texture = <ShadowMap>; MinFilter = POINT; MagFilter = POINT; MipFilter = NONE; AddressU = CLAMP; AddressV = CLAMP; };\n"
+    "float4 PcfPS(float3 sc : TEXCOORD0, float4 col : COLOR0) : COLOR {\n"
+    "  float4 d;\n"
+    "  d.x = tex2D(ShadowMapSampler, sc.xy).x;\n"
+    "  d.y = tex2D(ShadowMapSampler, sc.xy + ShadowInfo.Zero_Zero_OneOverMapSize_OneOverMapSize.zx).x;\n"
+    "  d.z = tex2D(ShadowMapSampler, sc.xy + ShadowInfo.Zero_Zero_OneOverMapSize_OneOverMapSize.yz).x;\n"
+    "  d.w = tex2D(ShadowMapSampler, sc.xy + ShadowInfo.Zero_Zero_OneOverMapSize_OneOverMapSize.wz).x;\n"
+    "  float4 lit = (d - (sc.z - 0.002) >= 0) ? 1.0 : 0.0;\n"
+    "  float s = dot(lit, 1.0) * 0.25;\n"
+    "  return float4(col.rgb * (0.3 + 0.7 * s), 1.0); }\n"
+    "technique Pcf { pass p0 { PixelShader = compile ps_2_0 PcfPS(); ZEnable = FALSE; CullMode = NONE; AlphaBlendEnable = FALSE; AlphaTestEnable = FALSE; } }\n"
+    ;
+enum { PCF_N = 64, PCF_X0 = 376, PCF_Y0 = 8, PCF_W = 256 };
+static float g_pcfMap[PCF_N * PCF_N];
+static const float kPcfU0 = 0.25f + 1.0f / (PCF_N * 32.0f);
+static float pcfAt(int i, int j) { if (i < 0) i = 0; if (j < 0) j = 0; if (i >= PCF_N) i = PCF_N - 1; if (j >= PCF_N) j = PCF_N - 1; return g_pcfMap[j * PCF_N + i]; }
+static double pcfRef(int x, int y, bool nine) {                         // the lit fraction at pixel (x, y) of the rectangle
+    double px = ((double)kPcfU0 + 0.5 * (x + 0.5) / PCF_W) * PCF_N, py = ((double)kPcfU0 + 0.5 * (y + 0.5) / PCF_W) * PCF_N;
+    int i = (int)floor(px), j = (int)floor(py); double fx = px - i, fy = py - j, s = 0;
+    if (!nine) { for (int b = 0; b < 2; ++b) for (int a = 0; a < 2; ++a) s += pcfAt(i + a, j + b) >= 0.498f ? 0.25 : 0.0; return s; }
+    double wx[3] = { 0.5 - 0.5 * fx, 0.5, 0.5 * fx }, wy[3] = { 0.5 - 0.5 * fy, 0.5, 0.5 * fy };
+    for (int b = 0; b < 3; ++b) for (int a = 0; a < 3; ++a) s += wx[a] * wy[b] * (pcfAt(i - 1 + a, j - 1 + b) >= 0.498f ? 1.0 : 0.0);
+    return s;
+}
 int main(int argc, char** argv) {
     AddVectoredExceptionHandler(1, harnessVeh);
     setvbuf(stdout, NULL, _IONBF, 0);
     if (argc < 4) { printf("usage: rt_harness off|on <frames> <out.txt>\n"); return 2; }
     bool rt = strcmp(argv[1], "on") == 0; int frames = atoi(argv[2]);
     bool optNoFpu = false, optBench = false, optWrap = false;
-    for (int i = 4; i < argc; ++i) { if (!strcmp(argv[i], "nofpu")) optNoFpu = true; else if (!strcmp(argv[i], "bench")) optBench = true; else if (!strcmp(argv[i], "wrap")) optWrap = true; }
+    int optTex = 0;                                       // texture decoding on worker threads: 1 on, 2 on with every result checked against D3DX on a real texture
+    bool optStream = false;                               // textures loaded by D3DX in the middle of every frame, drawn with at once, released (its own reference: run "off ... texstream" first)
+    bool optPanId = false;                                // pan pictures, test: every picture shown goes through the GPU rectangle with the camera it was drawn from and must come out the same (with a tween mode)
+    bool optPanSim = false;                               // pan pictures, live: a camera scrolling on the clock, frames of uneven length, a stall now and then (with tweenslow)
+    bool optShadowMatch = false;                          // ... the size matched to the map's reach: maps come and go with different numbers
+    bool optPanStop = false;                              // pan pictures, live: short scrolls that begin and end while the render thread is on (the plain pan test's scrolls end while it is switched off)
+    bool optFakeClock = false;                            // the screen's refreshes made up by the accelerator itself (60 a second): pictures are timed by "the screen" although no monitor is awake
+    bool optPcfOn = false;                                // ... with the accelerator's SmoothShadows switched on
+    bool optPcf = false;                                  // smooth shadows: a rectangle through a shader with the game's shadow lookup, against the four-point and the nine-point arithmetic
+    bool optShadowScale = false;                          // the finer shadow map: the tick against a wanted size the harness keeps (it plays the engine: gives less once, changes map once)
+    bool optPumpTest = false;                             // the waits: a message the render thread sends must get through; a message from elsewhere must not be handled inside a busy wait
+    bool optDump = false;                                 // picture dumps: two pairs (in-between + game) and two pictures shown from another camera, as files next to the DLL
+    bool optPanSlow = false;                              // ... with frames as long as a battle's (30 to 49 ms): the game's pictures then come slower than a 60 Hz screen refreshes, and pictures go up on the screen's beat (v66)
+    bool optTerrain = false;                              // ground-patch-style textures: created, level 0 written, the levels below made, drawn with, kept four frames (its own reference: run "off ... terrain" first)
+    int optTween = 0; bool optPress = false;              // in-between frames: 4 frames drawn off screen, 1 every frame's stretch run again and compared, 2 draws left out, 8 shown late, 32 as in a slow game
+    for (int i = 4; i < argc; ++i) { if (!strcmp(argv[i], "nofpu")) optNoFpu = true; else if (!strcmp(argv[i], "bench")) optBench = true; else if (!strcmp(argv[i], "wrap")) optWrap = true;
+        else if (!strcmp(argv[i], "tweenoff")) optTween = 4; else if (!strcmp(argv[i], "tween")) optTween = 1 | 4; else if (!strcmp(argv[i], "tweenbad")) optTween = 1 | 2 | 4;
+        else if (!strcmp(argv[i], "tweenlate")) optTween = 1 | 4 | 8; else if (!strcmp(argv[i], "tweenslow")) optTween = 32;
+        else if (!strcmp(argv[i], "tweenpress")) { optTween = 1 | 4; optPress = true; }
+        else if (!strcmp(argv[i], "tweenmid")) optTween = 1 | 4 | 8 | 64;      // a waiting frame is presented in the middle of the next frame's second pass
+        else if (!strcmp(argv[i], "texjobs")) optTex = 1; else if (!strcmp(argv[i], "texcheck")) optTex = 2; else if (!strcmp(argv[i], "texstream")) optStream = true; else if (!strcmp(argv[i], "terrain")) optTerrain = true; else if (!strcmp(argv[i], "panid")) optPanId = true; else if (!strcmp(argv[i], "pansim")) optPanSim = true; else if (!strcmp(argv[i], "panslow")) { optPanSim = true; optPanSlow = true; } else if (!strcmp(argv[i], "dump")) optDump = true; else if (!strcmp(argv[i], "pumptest")) optPumpTest = true; else if (!strcmp(argv[i], "shadowscale")) optShadowScale = true; else if (!strcmp(argv[i], "shadowmatch")) optShadowMatch = true; else if (!strcmp(argv[i], "pcf")) optPcf = true; else if (!strcmp(argv[i], "fakeclock")) optFakeClock = true; else if (!strcmp(argv[i], "panstop")) { optPanSim = true; optPanStop = true; } else if (!strcmp(argv[i], "pcfon")) { optPcf = true; optPcfOn = true; } }
+    typedef void (__cdecl* TwMarkF)(void*); TwMarkF twMark = NULL;
     // MULTITHREADED: the game runs on DXVK, which is safe to call from more than one thread; the Microsoft
     // runtime is only safe with this flag, and without it the render thread faults inside it. nofpu: device
     // may change the thread's x87 precision.
@@ -160,6 +220,8 @@ int main(int argc, char** argv) {
         if (optWrap) { typedef void (__cdecl* SeqF)(DWORD); SeqF sb = (SeqF)GetProcAddress(ha, "AotrRtTestSeqBase"); if (!sb) { printf("missing AotrRtTestSeqBase\n"); return 3; } sb(0xFFFFC000u); printf("queue sequence starts 16384 records before the 32-bit wrap\n"); }
         if (!rtInstall || !rtStats || !rtScoped) { printf("missing test exports\n"); return 3; }
         Sleep(1500);                                      // let the DLL's own init thread finish its patching
+        { typedef int (__cdecl* StF)(char*, int); StF st = (StF)GetProcAddress(ha, "AotrScreenClockSelfTest"); static char sb[512]; sb[0] = 0; if (st && optPanSim) { st(sb, sizeof(sb)); printf("%s\n", sb); } }
+        if (optFakeClock) { typedef void (__cdecl* FkF)(int); FkF fk = (FkF)GetProcAddress(ha, "AotrScreenClockFake"); if (!fk) { printf("missing AotrScreenClockFake\n"); return 3; } fk(16667); }
     }
     typedef void* (WINAPI* Create9F)(UINT);
     typedef HRESULT (WINAPI* CreateEffectF)(void*, const char*, UINT, void*, void*, DWORD, void*, void**, void**);
@@ -169,8 +231,12 @@ int main(int argc, char** argv) {
     CreateEffectF CreateEffect = (CreateEffectF)GetProcAddress(hx, "D3DXCreateEffect");
     CreateTextureF D3DXCreateTexture = (CreateTextureF)GetProcAddress(hx, "D3DXCreateTexture");
     FilterTextureF D3DXFilterTexture = (FilterTextureF)GetProcAddress(hx, "D3DXFilterTexture");
+    typedef HRESULT (WINAPI* CreateFromFileF)(void*, const void*, UINT, UINT, UINT, UINT, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, void*, void*, void**);
+    typedef HRESULT (WINAPI* LoadSurfMemF)(void*, const void*, const RECT*, const void*, DWORD, UINT, const void*, const RECT*, DWORD, DWORD);
+    CreateFromFileF D3DXCreateFromFile = (CreateFromFileF)GetProcAddress(hx, "D3DXCreateTextureFromFileInMemoryEx");
+    LoadSurfMemF D3DXLoadSurfMem = (LoadSurfMemF)GetProcAddress(hx, "D3DXLoadSurfaceFromMemory");
 
-    WNDCLASSA wc = {0}; wc.lpfnWndProc = DefWindowProcA; wc.hInstance = GetModuleHandleA(NULL); wc.lpszClassName = "rtharness";
+    WNDCLASSA wc = {0}; wc.lpfnWndProc = hWndProc; wc.hInstance = GetModuleHandleA(NULL); wc.lpszClassName = "rtharness";
     RegisterClassA(&wc);
     HWND hwnd = CreateWindowExA(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, "rtharness", "rt", WS_POPUP, -3000, -3000, 640, 480, NULL, NULL, wc.hInstance, NULL);
     ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -224,6 +290,28 @@ int main(int argc, char** argv) {
     CALL2(dev, 86, el, &decl);
     CALL2(dev, 59, 1, &sblock);
     if (!vb || !ib || !dvb || !tex || !dyntex || !srtSurf || !sz || !bb || !bbz || !cap || !sys || !decl || !sblock) { printf("resource creation failed\n"); return 6; }
+    void* fxP = NULL, *pcfTex = NULL; DWORD tPcf = 0; int pcfFour = 0, pcfNine = 0, pcfNeither = 0, pcfWorst4 = 0, pcfWorst9 = 0;
+    if (optPcf) {
+        void* e2 = NULL;
+        hr = CreateEffect(dev, kFxPcf, (UINT)strlen(kFxPcf), NULL, NULL, 0, NULL, &fxP, &e2);
+        if (FAILED(hr) || !fxP) { printf("pcf: D3DXCreateEffect hr=0x%08lX %s\n", (unsigned long)hr, e2 ? (char*)((void*(WINAPI*)(void*))vt(e2)[3])(e2) : ""); return 5; }
+        for (int j = 0; j < PCF_N; ++j) for (int i = 0; i < PCF_N; ++i) {
+            float v = (i * 3 + j * 2 < 5 * PCF_N / 2 + 9) ? 1.0f : 0.0f;
+            if ((i == 20 && j == 22) || (i == 23 && j == 27) || (i == 24 && j == 27)) v = 0.0f;
+            if ((i == 41 && j == 40) || (i == 44 && j == 36)) v = 1.0f;
+            g_pcfMap[j * PCF_N + i] = v; }
+        CALL8(dev, 23, PCF_N, PCF_N, 1, 0, 114, 1, &pcfTex, 0);
+        if (!pcfTex) { printf("pcf: no R32F texture\n"); return 6; }
+        { LOCKED_RECT lr; CALL4(pcfTex, 19, 0, &lr, 0, 0); for (int j = 0; j < PCF_N; ++j) memcpy((BYTE*)lr.pBits + j * lr.Pitch, &g_pcfMap[j * PCF_N], PCF_N * 4); CALL1(pcfTex, 20, 0); }
+        DWORD hSI = ((DWORD(WINAPI*)(void*, DWORD, const char*))vt(fxP)[9])(fxP, 0, "ShadowInfo");
+        DWORD hInv = hSI ? ((DWORD(WINAPI*)(void*, DWORD, const char*))vt(fxP)[9])(fxP, hSI, "Zero_Zero_OneOverMapSize_OneOverMapSize") : 0;
+        DWORD hMap = ((DWORD(WINAPI*)(void*, DWORD, const char*))vt(fxP)[9])(fxP, 0, "ShadowMap");
+        tPcf = ((DWORD(WINAPI*)(void*, const char*))vt(fxP)[13])(fxP, "Pcf");
+        if (!hInv || !hMap || !tPcf) { printf("pcf: handles missing\n"); return 5; }
+        float inv[4] = { 0, 0, 1.0f / PCF_N, 1.0f / PCF_N };
+        CALL2(fxP, 34, hInv, inv); CALL2(fxP, 52, hMap, pcfTex);
+        if (rt && optPcfOn) { typedef void (__cdecl* PcF)(int, char*, int); PcF pc = (PcF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrShadowPcfTest"); if (!pc) { printf("missing AotrShadowPcfTest"); return 3; } pc(1, NULL, 0); }
+    }
     void* sysSurf2 = NULL, *defTex = NULL, *defSurf = NULL, *sysTex = NULL, *defTex2 = NULL, *texLvl = NULL;
     CALL6(dev, 36, 64, 64, 21, 2, &sysSurf2, 0);                           // SYSTEMMEM offscreen plain surface
     CALL8(dev, 23, 64, 64, 1, 0, 21, 0, &defTex, 0); if (defTex) CALL2(defTex, 18, 0, &defSurf);   // DEFAULT texture
@@ -259,15 +347,30 @@ int main(int argc, char** argv) {
     ((HRESULT(WINAPI*)(void*, DWORD, BYTE*))vt(fx)[4])(fx, hWorld, refDesc);
     ((HRESULT(WINAPI*)(void*, DWORD, BYTE*))vt(fx)[5])(fx, tMain, refTech);
     refUsed = ((DWORD(WINAPI*)(void*, DWORD, DWORD))vt(fx)[62])(fx, hWorld, tMain);
-    int queryMismatch = 0;
+    int queryMismatch = 0, passMismatch = 0;
+    UINT passesMain = 0, passesShadow = 0;
+    { struct { const char* name; UINT passes, ann; } td;
+      memset(&td, 0, sizeof(td)); ((HRESULT(WINAPI*)(void*, DWORD, void*))vt(fx)[5])(fx, tMain, &td); passesMain = td.passes;
+      memset(&td, 0, sizeof(td)); ((HRESULT(WINAPI*)(void*, DWORD, void*))vt(fx)[5])(fx, tShadow, &td); passesShadow = td.passes; }
     // parameter block recorded before the render thread exists
     CALL0(fx, 73); { float col[4] = {1, 0.9f, 0.8f, 1}; CALL2(fx, 34, hColor, col); CALL2(fx, 30, hBlend, fbits(0.5f)); }
     DWORD blockA = ((DWORD(WINAPI*)(void*))vt(fx)[74])(fx);
 
     printf("resources ready (x87 control word now %04x), parameter block handle form %08lX\n", _control87(0, 0) & 0xFFFF, blockA);
+    if (rt && optTex) { typedef void (__cdecl* SetupF)(int, int, int); SetupF ts = (SetupF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrTexTestSetup");
+        if (!ts) { printf("missing AotrTexTestSetup\n"); return 3; } ts(-1, optTex == 2 ? 100000 : 0, 160); }
     if (rt) { int ok = rtInstall(dev, fx); printf("render thread install: %d\n", ok); if (!ok) return 7;
         { typedef void (__cdecl* AnyF)(int); AnyF any = (AnyF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestAtlasAny"); if (any) any(1); }
-        D3DXCreateTexture = (CreateTextureF)rtScoped("D3DXCreateTexture"); D3DXFilterTexture = (FilterTextureF)rtScoped("D3DXFilterTexture"); }
+        D3DXCreateTexture = (CreateTextureF)rtScoped("D3DXCreateTexture"); D3DXFilterTexture = (FilterTextureF)rtScoped("D3DXFilterTexture");
+        if (optPanId) { typedef void (__cdecl* PanF)(int); PanF pf = (PanF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrPanWarpTest"); if (!pf) { printf("missing AotrPanWarpTest\n"); return 3; } pf(1); }
+        if (optPanSim) { typedef void (__cdecl* PanF)(int); PanF pf = (PanF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrPanWarpTest"); if (!pf) { printf("missing AotrPanWarpTest\n"); return 3; } pf(4); }
+        if (optDump) { typedef void (__cdecl* DuF)(int, int); DuF du = (DuF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrTweenTestDump"); if (!du) { printf("missing AotrTweenTestDump\n"); return 3; } du(2, 2); }
+        D3DXCreateFromFile = (CreateFromFileF)rtScoped("D3DXCreateTextureFromFileInMemoryEx"); D3DXLoadSurfMem = (LoadSurfMemF)rtScoped("D3DXLoadSurfaceFromMemory");
+        if (!D3DXCreateFromFile || !D3DXLoadSurfMem) { printf("missing D3DX wrappers\n"); return 3; }
+        if (optTween) { typedef void (__cdecl* ModeF)(int); HMODULE ha = GetModuleHandleA("bfme2_accel.new.dll");
+            ModeF mode = (ModeF)GetProcAddress(ha, "AotrTweenTestMode"); twMark = (TwMarkF)GetProcAddress(ha, "AotrTweenTestMark");
+            if (!mode || !twMark) { printf("missing in-between frame test exports\n"); return 3; }
+            mode(optTween); printf("in-between frames: test mode %d\n", optTween); } }
     // a second parameter block recorded through the render thread
     CALL0(fx, 73); { float tint[4] = {0.9f, 1.0f, 1.1f, 1}; CALL2(fx, 34, hTint, tint); }
     DWORD blockB = ((DWORD(WINAPI*)(void*))vt(fx)[74])(fx);
@@ -353,7 +456,47 @@ int main(int argc, char** argv) {
     FILE* out = fopen(argv[3], "w");
     LARGE_INTEGER qf, t0, t1; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&t0);
     void* extraTex = NULL;
+    if (rt && optPumpTest) {
+        typedef void (__cdecl* SendF)(void*, DWORD); typedef void (__cdecl* BusyF)(DWORD, DWORD); typedef LONG (__cdecl* LF)();
+        HMODULE hm = GetModuleHandleA("bfme2_accel.new.dll");
+        SendF snd = (SendF)GetProcAddress(hm, "AotrRtTestSend"); BusyF busy = (BusyF)GetProcAddress(hm, "AotrRtTestBusy"); LF pumps = (LF)GetProcAddress(hm, "AotrRtTestPumps"); g_hWaiting = (LF)GetProcAddress(hm, "AotrRtTestWaiting");
+        if (!snd || !busy || !pumps || !g_hWaiting) { printf("missing pump test exports\n"); return 3; }
+        g_hWd = 1; CloseHandle(CreateThread(NULL, 0, hWdProc, NULL, 0, NULL));
+        LARGE_INTEGER qf, t0, t1; QueryPerformanceFrequency(&qf); QueryPerformanceCounter(&t0);
+        snd(hwnd, WM_USER + 77);                                      // the render thread sends this window a message while this thread waits for the queue
+        QueryPerformanceCounter(&t1);
+        int ms1 = (int)((t1.QuadPart - t0.QuadPart) * 1000 / qf.QuadPart);
+        LONG p0 = pumps();
+        HANDLE th = CreateThread(NULL, 0, hSender, hwnd, 0, NULL);   // another thread sends one 60 ms into ...
+        busy(20, 15);                                                 // ... 300 ms of the render thread working, a record every 20 ms, waited for here
+        LONG p1 = pumps(), inside = g_hMsg78;
+        MSG msg; DWORD until = GetTickCount() + 2000; while (!g_hMsg78 && GetTickCount() < until) { PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE); Sleep(1); }
+        WaitForSingleObject(th, 2000); CloseHandle(th);
+        g_hWd = 0;
+        bool ok = g_hMsg77 == 1 && inside == 0 && g_hMsg78 == 1 && g_hMsg78InWait == 0 && p1 == p0;
+        printf("pump test %s: a message sent by the render thread during a wait for the queue %s (the wait took %d ms); a message from another thread during a busy wait was handled %s (messages let through during it: %ld)\n",
+               ok ? "PASSED" : "FAILED", g_hMsg77 == 1 ? "got through" : "DID NOT get through", ms1, (inside == 0 && g_hMsg78 == 1 && g_hMsg78InWait == 0) ? "after the wait, as it must be" : "INSIDE the wait", (long)(p1 - p0));
+    }
+    // the engine's ShadowMap numbers as the harness plays them: [0] MapSize, [1] MaxViewDistance, [2] MinShadowedTerrainHeight - the current ones and the defaults
+    static DWORD hWant[3] = { 2048, 0, 0 }, hDef[3] = { 2048, 0, 0 }, hDevSlot = 0; static char hSmLog[320]; int hSmN = 0;
+    struct HSm { static void reach(DWORD* s, float r) { memcpy(&s[1], &r, 4); } };
+    HSm::reach(hDef, 1500.0f); HSm::reach(hWant, optShadowMatch ? 6000.0f : 1500.0f);        // (match: the first map is one with a long reach, as Helm's Deep)
+    if (rt && (optShadowScale || optShadowMatch)) { typedef void (__cdecl* SsF)(DWORD*, DWORD*, int, DWORD*, int, int); SsF ss = (SsF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrShadowScaleTest");
+        if (!ss) { printf("missing AotrShadowScaleTest\n"); return 3; } hDevSlot = (DWORD)(ULONG_PTR)dev; ss(hWant, &hDevSlot, optShadowMatch ? 1 : 4, hDef, optShadowMatch ? 1 : 0, 4); }
     for (int fr = 0; fr < frames; ++fr) {
+        if (optShadowScale || optShadowMatch) {
+            static DWORD last = 0; if (hWant[0] != last && hSmN < 280) { hSmN += sprintf(hSmLog + hSmN, "%s%d:%lu", hSmN ? " " : "", fr, (unsigned long)hWant[0]); last = hWant[0]; }
+            if (optShadowScale) {                                      // the engine's part: at frame 100 it "made" a smaller map than asked, at 200 a new map resets the size
+                if (fr == 100 && hWant[0] == 8192) hWant[0] = 4096;
+                if (fr == 200) hWant[0] = 1024;
+            } else {                                                   // maps come and go: the default numbers, a reach of 2200, a map that already has 4096 over 6000, the default again
+                if (fr == 100) { hWant[0] = 2048; HSm::reach(hWant, 1500.0f); }
+                if (fr == 200) { hWant[0] = 2048; HSm::reach(hWant, 2200.0f); }
+                if (fr == 300) { hWant[0] = 4096; HSm::reach(hWant, 6000.0f); }
+                if (fr == 400) { hWant[0] = 2048; HSm::reach(hWant, 1500.0f); }
+                if (fr == 500) { hWant[0] = 2048; HSm::reach(hWant, 6000.0f); }      // the same size as the map before it, a longer reach
+            }
+        }
         float time = fr * 0.05f;
         { BYTE d[44]; BYTE t[12]; memset(d, 0xCD, 44); memset(t, 0xCD, 12);
           ((HRESULT(WINAPI*)(void*, DWORD, BYTE*))vt(fx)[4])(fx, hWorld, d);
@@ -378,7 +521,7 @@ int main(int argc, char** argv) {
           HRESULT h4 = CALL2(dev, 37, 0, texLvl); if (SUCCEEDED(h4) && rt == false) mirrorMismatch++;          // not a render target: must fail
           void* w = NULL; CALL2(dev, 38, 0, &w); if (w != srtSurf) mirrorMismatch++; if (w) CALL0(w, 2); }
         CALL6(dev, 43, 0, 0, 1 | 2, 0xFFFFFFFF, fbits(1.0f), 0);
-        CALL1(fx, 58, tShadow); UINT np = 0; CALL2(fx, 63, &np, 6); CALL1(fx, 64, 0);
+        CALL1(fx, 58, tShadow); UINT np = 0; CALL2(fx, 63, &np, 6); if (np != passesShadow || !np) passMismatch++; CALL1(fx, 64, 0);
         CALL2(fx, 38, hLVP, lvp);
         for (int o = 0; o < 20; ++o) {
             matWorld(world, (o % 5) * 2.2f - 4.4f, 0.5f * sin(time + o), (o / 5) * 2.2f - 3.3f, time + o * 0.3f, 0.6f);
@@ -399,9 +542,27 @@ int main(int argc, char** argv) {
           if (CALL0(dev, 3) != 0) lockedMismatch++;                                                          // TestCooperativeLevel
           void* b2 = NULL; CALL4(dev, 18, 0, 0, 0, &b2); if (b2 != bb) lockedMismatch++; if (b2) CALL0(b2, 2);   // GetBackBuffer
           void* q9 = NULL; if (FAILED(CALL2(tex, 0, &kIIDTex9, &q9)) || q9 != tex) lockedMismatch++; if (q9) CALL0(q9, 2); }
+        static bool panNow = false; static LARGE_INTEGER panT0, panT, panF;
+        if (optPanSim) {                                               // the "scroll hook": most frames the camera is stepped, by the clock
+            if (fr == 0) { QueryPerformanceFrequency(&panF); QueryPerformanceCounter(&panT0); }
+            Sleep(optPanSlow ? 30 + (fr * 7) % 20 : 5 + (fr * 7) % 12);    // frames of uneven length
+            if (fr % 60 == 59) Sleep(150);                             // and a stall now and then
+            panNow = (fr % 200) >= 20 && (fr % 200) < 180;
+            if (optPanStop) panNow = ((fr / 50) % 2 == 0) && (fr % 50) >= 5 && (fr % 50) < 30;
+            QueryPerformanceCounter(&panT);
+            if (panNow && rt) { typedef void (__cdecl* ScF)(); static ScF sc = (ScF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrPanWarpTestScroll"); if (sc) sc(); }
+        }
+        if (twMark) twMark(dev);                                       // from here the frame is drawn into the back buffer
+        if (optPanSim) {                                               // the scene's camera, set before the scene is drawn (every draw of the frame is made "under" it)
+            static float camX = 0;
+            if (panNow) camX = 300.0f * (float)((double)(panT.QuadPart - panT0.QuadPart) / (double)panF.QuadPart);
+            float V[16] = { 1,0,0,0, 0,0.7071f,0.7071f,0, 0,0.7071f,-0.7071f,0, -camX,0,700.0f,1 };
+            float P[16] = { 1.35f,0,0,0, 0,1.8f,0,0, 0,0,1.0f,1, 0,0,-5.0f,0 };
+            CALL2(dev, 44, 3, P); CALL2(dev, 44, 2, V);
+        }
         CALL6(dev, 43, 0, 0, 1 | 2, 0xFF203040 + fr, fbits(1.0f), 0);
         CALL0(sblock, 4);                                              // application state block: capture
-        CALL1(fx, 58, tMain); CALL2(fx, 63, &np, 6); CALL1(fx, 64, 0);
+        np = 0; CALL1(fx, 58, tMain); CALL2(fx, 63, &np, 6); if (np != passesMain || !np) passMismatch++; CALL1(fx, 64, 0);
         if (blockC) CALL1(fx, 76, blockC);
         CALL0(fx, 73);
         { float t4[4] = {0.8f + 0.2f * (float)sin(time), 1.0f, 0.9f + 0.1f * (float)cos(time * 0.7f), 1.0f}; CALL2(fx, 34, hTint, t4);
@@ -465,6 +626,7 @@ int main(int argc, char** argv) {
           CALL8(dev, 84, 2, 0, 5, 4, li, 101, lv, sizeof(LV)); }
         // D3DX creation and mip filtering in the middle of a frame
         if (fr == 10) { D3DXCreateTexture(dev, 64, 64, 0, 0, 21, 1, &extraTex); if (extraTex) { LOCKED_RECT lr; CALL4(extraTex, 19, 0, &lr, 0, 0); memset(lr.pBits, 0x7F, 64 * 64 * 4); CALL1(extraTex, 20, 0); D3DXFilterTexture(extraTex, NULL, 0, 0xFFFFFFFF); } }
+        if (optPress && rt && fr % 7 == 4) { typedef void (__cdecl* PressF)(); static PressF press = (PressF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrTweenTestPressure"); if (press) press(); }   // "no ring space" in the middle of the frame
         if (extraTex) { CALL2(dev, 65, 0, extraTex); CALL1(dev, 89, 0x4 | 0x40 | 0x100);
             struct TV2 { float x, y, z, w; DWORD c; float u, v; } q2[4] = { {500,10,0,1,0xFFFFFFFF,0,0}, {630,10,0,1,0xFFFFFFFF,1,0}, {500,140,0,1,0xFFFFFFFF,0,1}, {630,140,0,1,0xFFFFFFFF,1,1} };
             CALL4(dev, 83, 5, 2, q2, sizeof(TV2)); CALL2(dev, 65, 0, 0); }
@@ -491,6 +653,104 @@ int main(int argc, char** argv) {
             CALL4(dev, 83, 5, 2, qf, sizeof(TVF)); CALL2(dev, 65, 0, 0);
             CALL0(freshTex, 2);
           }
+        }
+        // textures arriving in the middle of the frame, as the engine's asset streamer delivers them: a .dds with one mip
+        // level (D3DX builds and compresses the rest), a terrain-style surface load + mip filter into DXT1 and into
+        // R5G6B5, each drawn small enough to sample the built levels, then released
+        if (optStream) {
+            static BYTE dds[128 + 128 * 128 / 2]; static DWORD px[64 * 64];
+            int side = (fr % 3 == 0) ? 128 : 64, blocks = (side / 4) * (side / 4);
+            memset(dds, 0, 128); memcpy(dds, "DDS ", 4);
+            DWORD* hd = (DWORD*)(dds + 4); hd[0] = 124; hd[1] = 0x81007; hd[2] = side; hd[3] = side; hd[4] = blocks * 8; hd[18] = 32; hd[19] = 4; memcpy(&hd[20], "DXT1", 4); hd[26] = 0x1000;
+            for (int k = 0; k < blocks; ++k) { BYTE* b = dds + 128 + k * 8; WORD c0 = (WORD)(0x8410 + k * 37 + fr * 211), c1 = (WORD)(0x0400 + k * 11 + fr * 5); if (c0 <= c1) { WORD t = c0; c0 = c1; c1 = t; if (c0 == c1) c0++; }
+                b[0] = (BYTE)c0; b[1] = (BYTE)(c0 >> 8); b[2] = (BYTE)c1; b[3] = (BYTE)(c1 >> 8); b[4] = (BYTE)(k * 29 + fr); b[5] = (BYTE)(k * 7 + fr * 3); b[6] = (BYTE)(k ^ fr); b[7] = (BYTE)(k * 13 + 5); }
+            for (int k = 0; k < 64 * 64; ++k) px[k] = 0xFF000000u | (DWORD)((k * 3 + fr * 5) & 0xFF) << 16 | (DWORD)(((k >> 6) * 4 + fr) & 0xFF) << 8 | (DWORD)((k * 7) & 0xFF);
+            void* st[3] = { NULL, NULL, NULL };
+            D3DXCreateFromFile(dev, dds, 128 + blocks * 8, side, side, 0, 0, 0, 1, 0xFFFFFFFFu, 5, 0, NULL, NULL, &st[0]);
+            for (int k = 1; k < 3; ++k) {
+                if (FAILED(D3DXCreateTexture(dev, 64, 64, 0, 0, k == 1 ? 0x31545844u : 23u, 1, &st[k])) || !st[k]) continue;
+                void* lvl = NULL; RECT rc = { 0, 0, 64, 64 };
+                if (SUCCEEDED(CALL2(st[k], 18, 0, &lvl)) && lvl) { D3DXLoadSurfMem(lvl, NULL, NULL, px, 22, 64 * 4, NULL, &rc, 1, 0); CALL0(lvl, 2); }
+                D3DXFilterTexture(st[k], NULL, 0, 5);
+            }
+            CALL1(dev, 89, 0x4 | 0x40 | 0x100); CALL3(dev, 69, 0, 7, 1);                                       // mip filter POINT: the built levels are what gets sampled
+            for (int k = 0; k < 3; ++k) {
+                if (!st[k]) continue;
+                CALL2(dev, 65, 0, st[k]);
+                float x0 = 300.0f + k * 70, sz = (k == 0) ? 30.0f : 14.0f;
+                struct TVS { float x, y, z, w; DWORD c; float u, v; } qs[4] = { {x0,420,0,1,0xFFFFFFFF,0,0}, {x0+sz,420,0,1,0xFFFFFFFF,1,0}, {x0,420+sz,0,1,0xFFFFFFFF,0,1}, {x0+sz,420+sz,0,1,0xFFFFFFFF,1,1} };
+                CALL4(dev, 83, 5, 2, qs, sizeof(TVS));
+                struct TVS qb[4] = { {x0,440,0,1,0xFFFFFFFF,0,0}, {x0+60,440,0,1,0xFFFFFFFF,1,0}, {x0,476,0,1,0xFFFFFFFF,0,1}, {x0+60,476,0,1,0xFFFFFFFF,1,1} };
+                CALL4(dev, 83, 5, 2, qb, sizeof(TVS));
+            }
+            // ...and geometry arriving the same way: a static vertex buffer and index buffer created now, filled through a
+            // lock with no flags (which may read), bound, drawn; every third frame the vertex buffer is locked with no
+            // flags AGAIN after it was drawn with, two corners moved, and drawn once more; then both are released
+            { void* svb = NULL, *sib = NULL;
+              struct SV { float x, y, z, w; DWORD c; float u, v; };
+              if (SUCCEEDED(CALL6(dev, 26, 4 * sizeof(SV), 0, 0x4 | 0x40 | 0x100, 1, &svb, 0)) && svb && SUCCEEDED(CALL6(dev, 27, 6 * 2, 0, 101, 1, &sib, 0)) && sib) {
+                  void* pv = NULL; float bx = 520.0f + (float)(fr % 7) * 3.0f, by = 400.0f;
+                  // (v55) the first fill is sometimes a DISCARD or NOOVERWRITE lock of the whole buffer: what is in the buffer afterwards is the same,
+                  // but the DLL has to know it without reading the device when the buffer is locked to read two draws later
+                  DWORD firstFlags = (fr % 5 == 2) ? 0x2000u : (fr % 5 == 4) ? 0x1000u : 0u;
+                  if (SUCCEEDED(CALL4(svb, 11, 0, 0, &pv, firstFlags)) && pv) {
+                      SV q[4] = { {bx,by,0,1,0xFFFFFFFF,0,0}, {bx+70,by,0,1,0xFFFFFFFF,1,0}, {bx,by+50,0,1,0xFFFFFFFF,0,1}, {bx+70,by+50,0,1,0xFF80FFFF,1,1} };
+                      memcpy(pv, q, sizeof(q)); CALL0(svb, 12); }
+                  if (SUCCEEDED(CALL4(sib, 11, 0, 0, &pv, 0)) && pv) { WORD ix[6] = { 0, 1, 2, 1, 3, 2 }; memcpy(pv, ix, sizeof(ix)); CALL0(sib, 12); }
+                  CALL1(dev, 89, 0x4 | 0x40 | 0x100); CALL2(dev, 65, 0, st[0]);
+                  CALL4(dev, 100, 0, svb, 0, sizeof(SV)); CALL1(dev, 104, sib);
+                  CALL6(dev, 82, 4, 0, 0, 4, 0, 2);
+                  if (fr % 3 == 1 && SUCCEEDED(CALL4(svb, 11, 0, 0, &pv, 0)) && pv) {                  // read what is there, change part of it
+                      SV* v = (SV*)pv; v[0].y += 60; v[1].y += 60; v[2].y = v[0].y + 30 + (float)(fr % 5); v[3].y = v[2].y; v[3].c = v[0].c ^ 0x00FF00FFu;
+                      CALL0(svb, 12);
+                      CALL6(dev, 82, 4, 0, 0, 4, 0, 2);
+                  }
+                  CALL2(dev, 65, 0, 0);
+              }
+              if (svb) CALL0(svb, 2);
+              if (sib) CALL0(sib, 2); }
+            CALL2(dev, 65, 0, 0); CALL3(dev, 69, 0, 7, 0);
+            for (int k = 0; k < 3; ++k) if (st[k]) CALL0(st[k], 2);
+        }
+        // ground patch textures as the game makes them while the camera scrolls: a new managed A1R5G5B5 texture with
+        // three levels, level 0 written through a full lock, the two levels below made from it (off: D3DXFilterTexture,
+        // box; on: the accelerator writes them itself through locks of their own), drawn at once at all three levels,
+        // kept alive and drawn for four frames, then released
+        if (optTerrain) {
+            static void* live[4] = { NULL, NULL, NULL, NULL }; static WORD l0[256 * 256];
+            typedef int (__cdecl* TerrF)(void*, const WORD*, int, int); typedef void (__cdecl* AnyF)(int);
+            static TerrF terr = rt ? (TerrF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrTerrainHarnessBuild") : NULL;
+            static AnyF any = rt ? (AnyF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestAtlasAny") : NULL;
+            int nNew = (fr % 4 == 3) ? 0 : (fr % 4 == 1) ? 2 : 1;                                             // none, one or two new ones in a frame
+            for (int q = 0; q < nNew; ++q) {
+                int slot = (fr * 2 + q) & 3, side = ((fr + q) % 5 == 0) ? 128 : 256;
+                if (live[slot]) { CALL0(live[slot], 2); live[slot] = NULL; }
+                DWORD seed = 0x9E3779B9u * (DWORD)(fr * 2 + q + 1);
+                for (int k = 0; k < side * side; ++k) { seed = seed * 1664525u + 1013904223u; l0[k] = (WORD)((seed >> 13) ^ (k * 131)); }
+                void* tt = NULL;
+                if (FAILED(D3DXCreateTexture(dev, side, side, 3, 0, 25, 1, &tt)) || !tt) continue;
+                int own = 0;
+                if (terr) { if (any) any(0); own = terr(tt, l0, side, (fr % 50) == 2); if (any) any(1); }      // (the atlas mirror takes any caller in this harness; in the game it does not take this one)
+                if (own <= 0) {
+                    if (own < 0 || !terr) { void* lvl = NULL; LOCKED_RECT lr;
+                        if (SUCCEEDED(CALL2(tt, 18, 0, &lvl)) && lvl) { if (SUCCEEDED(CALL3(lvl, 13, &lr, 0, 0))) { for (int y = 0; y < side; ++y) memcpy((BYTE*)lr.pBits + y * lr.Pitch, l0 + y * side, side * 2); CALL0(lvl, 14); } CALL0(lvl, 2); } }
+                    D3DXFilterTexture(tt, NULL, 0, 5);
+                }
+                live[slot] = tt;
+            }
+            CALL1(dev, 89, 0x4 | 0x40 | 0x100); CALL3(dev, 69, 0, 7, 1);                                       // mip filter POINT: each level is sampled as it is
+            for (int k = 0; k < 4; ++k) {
+                if (!live[k]) continue;
+                CALL2(dev, 65, 0, live[k]);
+                float x0 = 20.0f + k * 150.0f, y0 = 150.0f;
+                struct TVT { float x, y, z, w; DWORD c; float u, v; };
+                TVT a0[4] = { {x0,y0,0,1,0xFFFFFFFF,0,0}, {x0+64,y0,0,1,0xFFFFFFFF,0.25f,0}, {x0,y0+64,0,1,0xFFFFFFFF,0,0.25f}, {x0+64,y0+64,0,1,0xFFFFFFFF,0.25f,0.25f} };   // one texel to a pixel (256): level 0
+                TVT a1[4] = { {x0+70,y0,0,1,0xFFFFFFFF,0,0}, {x0+134,y0,0,1,0xFFFFFFFF,0.5f,0}, {x0+70,y0+64,0,1,0xFFFFFFFF,0,0.5f}, {x0+134,y0+64,0,1,0xFFFFFFFF,0.5f,0.5f} }; // two to a pixel: level 1
+                TVT a2[4] = { {x0,y0+70,0,1,0xFFFFFFFF,0,0}, {x0+64,y0+70,0,1,0xFFFFFFFF,1,0}, {x0,y0+134,0,1,0xFFFFFFFF,0,1}, {x0+64,y0+134,0,1,0xFFFFFFFF,1,1} };             // four to a pixel: level 2
+                CALL4(dev, 83, 5, 2, a0, sizeof(TVT)); CALL4(dev, 83, 5, 2, a1, sizeof(TVT)); CALL4(dev, 83, 5, 2, a2, sizeof(TVT));
+            }
+            CALL2(dev, 65, 0, 0); CALL3(dev, 69, 0, 7, 0);
+            if (fr == frames - 1) for (int k = 0; k < 4; ++k) if (live[k]) { CALL0(live[k], 2); live[k] = NULL; }
         }
         // shroud-style updates: lock the rect (1,1)-(63,63), copy every row, unlock - 32-bit and 16-bit textures
         for (int k = 0; k < 62 * 62 * 4; ++k) shrRows[k] = (BYTE)((k * 7 + fr * 13) ^ (k >> 5));
@@ -571,12 +831,34 @@ int main(int argc, char** argv) {
         }
         // a surface fetched from the device and released in the same frame
         { void* rtS = NULL; CALL2(dev, 38, 0, &rtS); if (rtS) CALL0(rtS, 2); }
+        if (optPcf) {                                                    // the rectangle with the game's shadow lookup, last, so that nothing is drawn over it
+            UINT npP = 0; CALL1(fxP, 58, tPcf); CALL2(fxP, 63, &npP, 6); CALL1(fxP, 64, 0);
+            CALL1(dev, 92, 0); CALL1(dev, 89, 0x10144);                  // no vertex shader; XYZRHW | DIFFUSE | TEX1, three wide
+            struct PVX { float x, y, z, w; DWORD c; float u, v, d; } pq[4];
+            for (int k = 0; k < 4; ++k) { bool r = (k & 1) != 0, b = (k & 2) != 0;
+                pq[k].x = (float)PCF_X0 + (r ? (float)PCF_W : 0.0f) - 0.5f; pq[k].y = (float)PCF_Y0 + (b ? (float)PCF_W : 0.0f) - 0.5f; pq[k].z = 0; pq[k].w = 1; pq[k].c = 0xFFFFFFFFu;
+                pq[k].u = kPcfU0 + (r ? 0.5f : 0.0f); pq[k].v = kPcfU0 + (b ? 0.5f : 0.0f); pq[k].d = 0.5f; }
+            CALL4(dev, 83, 5, 2, pq, sizeof(PVX));
+            CALL0(fxP, 66); CALL0(fxP, 67);
+            CALL1(dev, 107, 0);
+        }
         CALL0(dev, 42);                                                   // EndScene
         // read back and hash
         CALL5(dev, 34, bb, 0, cap, 0, 1);
         CALL2(dev, 32, cap, sys);
         LOCKED_RECT lr; unsigned long long h = 1469598103934665603ull;
-        if (SUCCEEDED(CALL3(sys, 13, &lr, 0, 0x10))) { for (int y = 0; y < 480; ++y) h = fnv((BYTE*)lr.pBits + y * lr.Pitch, 640 * 4, h); CALL0(sys, 14); }
+        if (SUCCEEDED(CALL3(sys, 13, &lr, 0, 0x10))) { for (int y = 0; y < 480; ++y) h = fnv((BYTE*)lr.pBits + y * lr.Pitch, 640 * 4, h);
+            if (optPcf) {                                                // the rectangle against the game's four-point sum and against the nine-point lookup
+                int bad4 = 0, bad9 = 0;
+                for (int y = 0; y < PCF_W; ++y) for (int x = 0; x < PCF_W; ++x) {
+                    int got = (int)((((const DWORD*)((const BYTE*)lr.pBits + (PCF_Y0 + y) * lr.Pitch))[PCF_X0 + x] >> 16) & 0xFF);
+                    int w4 = (int)floor(255.0 * (0.3 + 0.7 * pcfRef(x, y, false)) + 0.5), w9 = (int)floor(255.0 * (0.3 + 0.7 * pcfRef(x, y, true)) + 0.5);
+                    int d4 = abs(got - w4), d9 = abs(got - w9);
+                    if (d4 > 1) ++bad4; if (d9 > 1) ++bad9; if (d4 > pcfWorst4) pcfWorst4 = d4; if (d9 > pcfWorst9) pcfWorst9 = d9;
+                }
+                if (!bad4) ++pcfFour; else if (!bad9) ++pcfNine; else ++pcfNeither;
+            }
+            CALL0(sys, 14); }
         { DWORD tMain = ((DWORD(WINAPI*)(void*, const char*))vt(fx)[13])(fx, "Main");                  // annotation reads, as the engine does per skinned mesh
           DWORD ha = ((DWORD(WINAPI*)(void*, DWORD, const char*))vt(fx)[19])(fx, tMain, "MaxSkinningBones");
           DWORD hb = ((DWORD(WINAPI*)(void*, DWORD, DWORD))vt(fx)[18])(fx, tMain, 0);
@@ -586,16 +868,36 @@ int main(int argc, char** argv) {
         if (fr == 100 || fr == 400 || fr == frames - 1) for (int lv = 1; lv <= 3; lv += 2) { LOCKED_RECT ml;
             if (SUCCEEDED(CALL4(atlas2Tex, 19, lv, &ml, 0, 0x10))) { int dim = 256 >> lv; for (int y = 0; y < dim; ++y) h = fnv((BYTE*)ml.pBits + y * ml.Pitch, dim * 2, h); CALL1(atlas2Tex, 20, lv); } }
         fprintf(out, "%d %016llx\n", fr, h); fflush(out);
+        if (optPanSim) {                                               // as the engine does right before the interface: its 2D camera (a VIEW that never moves), then the 3D pass ends
+            float V2d[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,-1.0f,1 };
+            float P2d[16] = { 2.0f,0,0,0, 0,2.0f,0,0, 0,0,-1.99f,-1, 0,0,-1.98f,0 };
+            CALL2(dev, 44, 3, P2d); CALL2(dev, 44, 2, V2d);            // (nothing in this harness draws through the device's transforms)
+            if (rt) { typedef void (__cdecl* VeF)(); static VeF ve = (VeF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrTweenTestViewsEnd"); if (ve) ve(); }
+        }
         ((HRESULT(WINAPI*)(void*, void*, void*, HWND, void*))vt(dev)[17])(dev, NULL, NULL, NULL, NULL);
     }
     QueryPerformanceCounter(&t1);
     fclose(out);
     double ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / qf.QuadPart;
     printf("%s: %d frames in %.1f ms\n", rt ? "RT on" : "RT off", frames, ms);
-    printf("cached query mismatches: %d\n", queryMismatch);
+    printf("cached query mismatches: %d, Begin pass count mismatches: %d\n", queryMismatch, passMismatch);
+    if (rt && optShadowScale) printf("shadow scale: wanted size by frame - %s (expected 0:2048 1:8192 101:4096; the change of map at frame 200, 1024 made 4096, is in the log)\n", hSmLog);
+    if (rt && optShadowMatch) { bool ok = !strcmp(hSmLog, "0:2048 1:8192 101:2048 201:4096 301:8192 401:2048 501:8192");   /* long reach: 8192; default numbers: left alone; reach 2200: 4096; 4096 over 6000: 8192; default; the same size with a long reach again: 8192 */ printf("shadow match %s: wanted size by frame - %s\n", ok ? "as expected" : "NOT AS EXPECTED", hSmLog); }
+    if (rt && optPanSim) { typedef void (__cdecl* TsF)(char*, int); TsF ts = (TsF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrPanWarpStats"); static char tb[2600]; tb[0] = 0; if (ts) ts(tb, sizeof(tb)); printf("%s\n", tb); }
+    if (rt && optPanId) { typedef void (__cdecl* TsF)(char*, int); TsF ts = (TsF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrPanWarpStats"); static char tb[768]; tb[0] = 0; if (ts) ts(tb, sizeof(tb)); printf("%s\n", tb); }
+    if (rt && optTerrain) { typedef void (__cdecl* TsF)(char*, int); TsF ts = (TsF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrTerrainHarnessStats"); static char tb[512]; tb[0] = 0; if (ts) ts(tb, sizeof(tb)); printf("%s\n", tb); }
     printf("sysmem lock mismatches: %d, render-target mirror mismatches: %d, lock-only call mismatches: %d\n", sysMismatch, mirrorMismatch, lockedMismatch);
+    if (optPcf) { static char pb[512]; pb[0] = 0;
+        if (rt) { typedef void (__cdecl* PcF)(int, char*, int); PcF pc = (PcF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrShadowPcfTest"); if (pc) pc(-1, pb, sizeof(pb)); }
+        printf("pcf: of %d frames the rectangle was the game's four-point sum in %d, the nine-point lookup in %d, neither in %d%s%s\n", frames, pcfFour, pcfNine, pcfNeither, pb[0] ? " | " : "", pb); }
     if (rt) { char st[512]; rtStats(st, sizeof(st)); printf("rt stats: %s\n", st);
         typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
-        if (s4) { s4(st, sizeof(st)); printf("rt v4 stats: %s\n", st); } }
+        if (s4) { s4(st, sizeof(st)); printf("rt v4 stats: %s\n", st); }
+        if (optTex) { typedef void (__cdecl* TxStatsF)(char*, int); TxStatsF xs = (TxStatsF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrTexTestStats");
+                      if (xs) { static char xb[2000]; xs(xb, sizeof(xb)); printf("%s\n", xb); } }
+        if (optTween) { typedef void (__cdecl* TwStatsF)(char*, int); TwStatsF ts = (TwStatsF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrTweenTestStats");
+            static char tst[2048]; if (ts) { ts(tst, sizeof(tst)); printf("in-between frames: %s\n", tst); }
+            TwStatsF ds = (TwStatsF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrDevPassStats");
+            if (ds) { ds(tst, sizeof(tst)); printf("in-between frames, %s\n", tst); } } }
     return 0;
 }

@@ -145,6 +145,7 @@ static DWORD __fastcall hkRlErase(DWORD* v, void* edx, DWORD first, DWORD last) 
 }
 static void __fastcall hkRlDrawGen(void* self, void* edx, DWORD effect, DWORD count) {  // 0x54A1F0 while only drawgen wants to know the mesh
     DWORD prev = g_dgMesh; g_dgMesh = (DWORD)(ULONG_PTR)self;
+    if (g_twDrawTag) g_twDrawTag((DWORD)(ULONG_PTR)self, count);
     o_rlDraw(self, edx, effect, count);
     g_dgMesh = prev;
 }
@@ -153,6 +154,7 @@ static void __fastcall hkRlDraw(void* self, void* edx, DWORD effect, DWORD count
     LONG ph = g_phase; if (ph < 0 || ph >= PH_N) ph = PH_OTHER;
     ULONG64 t0 = __rdtsc();
     DWORD prevMesh = g_dgMesh; g_dgMesh = (DWORD)(ULONG_PTR)self;
+    if (g_twDrawTag) g_twDrawTag((DWORD)(ULONG_PTR)self, count);
     o_rlDraw(self, edx, effect, count);
     g_dgMesh = prevMesh;
     g_rlDrawT[ph] += (LONG64)(__rdtsc() - t0); g_rlDrawN[ph]++;

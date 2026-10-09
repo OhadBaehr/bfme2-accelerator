@@ -65,6 +65,7 @@ static DWORD __stdcall rt_dev_4(void* self) {   // GetAvailableTextureMem [S ]
 static DWORD __stdcall rt_dev_5(void* self) {   // EvictManagedResources [A ]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(5);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_dev[5])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*))g_rtO_dev[5])(self);
     }
@@ -110,6 +111,7 @@ static DWORD __stdcall rt_dev_9(void* self, DWORD a0) {   // GetCreationParamete
 static DWORD __stdcall rt_dev_10(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetCursorProperties [S vvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(10);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[10])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[10])(self, a0, a1, a2);
     }
@@ -120,6 +122,7 @@ static DWORD __stdcall rt_dev_10(void* self, DWORD a0, DWORD a1, DWORD a2) {   /
 static DWORD __stdcall rt_dev_11(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetCursorPosition [S vvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(11);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[11])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[11])(self, a0, a1, a2);
     }
@@ -130,6 +133,7 @@ static DWORD __stdcall rt_dev_11(void* self, DWORD a0, DWORD a1, DWORD a2) {   /
 static DWORD __stdcall rt_dev_12(void* self, DWORD a0) {   // ShowCursor [S v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(12);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[12])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[12])(self, a0);
     }
@@ -187,6 +191,7 @@ static DWORD __stdcall rt_dev_19(void* self, DWORD a0, DWORD a1) {   // GetRaste
 static DWORD __stdcall rt_dev_20(void* self, DWORD a0) {   // SetDialogBoxMode [S v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(20);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[20])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[20])(self, a0);
     }
@@ -197,6 +202,7 @@ static DWORD __stdcall rt_dev_20(void* self, DWORD a0) {   // SetDialogBoxMode [
 static DWORD __stdcall rt_dev_21(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetGammaRamp [A vvp1536]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(21);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[21])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[21])(self, a0, a1, a2);
     }
@@ -238,24 +244,8 @@ static DWORD __stdcall rt_dev_25(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD
     rtExecLock(); g_rtDirectScope++; DWORD r = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[25])(self, a0, a1, a2, a3, a4, a5, a6); g_rtDirectScope--; LeaveCriticalSection(&g_rtExecCs);
     g_rtNLocked++; return r;
 }
-static DWORD __stdcall rt_dev_26(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5) {   // CreateVertexBuffer [L vvvvvv]
-    DWORD tid = __readfsdword(0x24);
-    if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
-        if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[26])(self, a0, a1, a2, a3, a4, a5); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
-        return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[26])(self, a0, a1, a2, a3, a4, a5);
-    }
-    rtExecLock(); g_rtDirectScope++; DWORD r = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[26])(self, a0, a1, a2, a3, a4, a5); g_rtDirectScope--; LeaveCriticalSection(&g_rtExecCs);
-    g_rtNLocked++; return r;
-}
-static DWORD __stdcall rt_dev_27(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5) {   // CreateIndexBuffer [L vvvvvv]
-    DWORD tid = __readfsdword(0x24);
-    if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
-        if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[27])(self, a0, a1, a2, a3, a4, a5); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
-        return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[27])(self, a0, a1, a2, a3, a4, a5);
-    }
-    rtExecLock(); g_rtDirectScope++; DWORD r = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[27])(self, a0, a1, a2, a3, a4, a5); g_rtDirectScope--; LeaveCriticalSection(&g_rtExecCs);
-    g_rtNLocked++; return r;
-}
+static DWORD __stdcall rt_dev_26(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5);   // CreateVertexBuffer (hand-written)
+static DWORD __stdcall rt_dev_27(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5);   // CreateIndexBuffer (hand-written)
 static DWORD __stdcall rt_dev_28(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5, DWORD a6, DWORD a7) {   // CreateRenderTarget [L vvvvvvvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
@@ -278,6 +268,7 @@ static DWORD __stdcall rt_dev_30(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD
 static DWORD __stdcall rt_dev_31(void* self, DWORD a0, DWORD a1) {   // UpdateTexture [A oo]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(31);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[31])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[31])(self, a0, a1);
     }
@@ -312,6 +303,7 @@ static DWORD __stdcall rt_dev_33(void* self, DWORD a0, DWORD a1) {   // GetFront
 static DWORD __stdcall rt_dev_34(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4) {   // StretchRect [A op16op16v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(34);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[34])(self, a0, a1, a2, a3, a4); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[34])(self, a0, a1, a2, a3, a4);
     }
@@ -329,6 +321,7 @@ static DWORD __stdcall rt_dev_34(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD
 static DWORD __stdcall rt_dev_35(void* self, DWORD a0, DWORD a1, DWORD a2) {   // ColorFill [A op16v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(35);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[35])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[35])(self, a0, a1, a2);
     }
@@ -357,6 +350,7 @@ static DWORD __stdcall rt_dev_40(void* self, DWORD a0);   // GetDepthStencilSurf
 static DWORD __stdcall rt_dev_41(void* self) {   // BeginScene [A ]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(41);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_dev[41])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*))g_rtO_dev[41])(self);
     }
@@ -369,6 +363,7 @@ static DWORD __stdcall rt_dev_41(void* self) {   // BeginScene [A ]
 static DWORD __stdcall rt_dev_42(void* self) {   // EndScene [A ]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(42);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_dev[42])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*))g_rtO_dev[42])(self);
     }
@@ -381,6 +376,7 @@ static DWORD __stdcall rt_dev_42(void* self) {   // EndScene [A ]
 static DWORD __stdcall rt_dev_43(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5) {   // Clear [A vpc16@0vvvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(43);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[43])(self, a0, a1, a2, a3, a4, a5); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[43])(self, a0, a1, a2, a3, a4, a5);
     }
@@ -399,6 +395,7 @@ static DWORD __stdcall rt_dev_43(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD
 static DWORD __stdcall rt_dev_44(void* self, DWORD a0, DWORD a1) {   // SetTransform [A vp64]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(44);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[44])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[44])(self, a0, a1);
     }
@@ -423,6 +420,7 @@ static DWORD __stdcall rt_dev_45(void* self, DWORD a0, DWORD a1) {   // GetTrans
 static DWORD __stdcall rt_dev_46(void* self, DWORD a0, DWORD a1) {   // MultiplyTransform [A vp64]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(46);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[46])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[46])(self, a0, a1);
     }
@@ -437,6 +435,7 @@ static DWORD __stdcall rt_dev_46(void* self, DWORD a0, DWORD a1) {   // Multiply
 static DWORD __stdcall rt_dev_47(void* self, DWORD a0) {   // SetViewport [A p24]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(47);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[47])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[47])(self, a0);
     }
@@ -460,6 +459,7 @@ static DWORD __stdcall rt_dev_48(void* self, DWORD a0) {   // GetViewport [S v]
 static DWORD __stdcall rt_dev_49(void* self, DWORD a0) {   // SetMaterial [A p68]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(49);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[49])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[49])(self, a0);
     }
@@ -483,6 +483,7 @@ static DWORD __stdcall rt_dev_50(void* self, DWORD a0) {   // GetMaterial [S v]
 static DWORD __stdcall rt_dev_51(void* self, DWORD a0, DWORD a1) {   // SetLight [A vp104]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(51);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[51])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[51])(self, a0, a1);
     }
@@ -507,6 +508,7 @@ static DWORD __stdcall rt_dev_52(void* self, DWORD a0, DWORD a1) {   // GetLight
 static DWORD __stdcall rt_dev_53(void* self, DWORD a0, DWORD a1) {   // LightEnable [A vv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(53);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[53])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[53])(self, a0, a1);
     }
@@ -531,6 +533,7 @@ static DWORD __stdcall rt_dev_54(void* self, DWORD a0, DWORD a1) {   // GetLight
 static DWORD __stdcall rt_dev_55(void* self, DWORD a0, DWORD a1) {   // SetClipPlane [A vp16]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(55);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[55])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[55])(self, a0, a1);
     }
@@ -555,6 +558,7 @@ static DWORD __stdcall rt_dev_56(void* self, DWORD a0, DWORD a1) {   // GetClipP
 static DWORD __stdcall rt_dev_57(void* self, DWORD a0, DWORD a1) {   // SetRenderState [A vv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNote2(57, a0, a1);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[57])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[57])(self, a0, a1);
     }
@@ -590,6 +594,7 @@ static DWORD __stdcall rt_dev_60(void* self) {   // BeginStateBlock [S ]
     rtDsRecording(1);
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(60);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_dev[60])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*))g_rtO_dev[60])(self);
     }
@@ -601,6 +606,7 @@ static DWORD __stdcall rt_dev_61(void* self, DWORD a0) {   // EndStateBlock [S v
     rtDsRecording(0);
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(61);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[61])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[61])(self, a0);
     }
@@ -611,6 +617,7 @@ static DWORD __stdcall rt_dev_61(void* self, DWORD a0) {   // EndStateBlock [S v
 static DWORD __stdcall rt_dev_62(void* self, DWORD a0) {   // SetClipStatus [A p8]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(62);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[62])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[62])(self, a0);
     }
@@ -644,6 +651,7 @@ static DWORD __stdcall rt_dev_64(void* self, DWORD a0, DWORD a1) {   // GetTextu
 static DWORD __stdcall rt_dev_65(void* self, DWORD a0, DWORD a1) {   // SetTexture [A vo]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNote2(65, a0, a1);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[65])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[65])(self, a0, a1);
     }
@@ -668,6 +676,7 @@ static DWORD __stdcall rt_dev_66(void* self, DWORD a0, DWORD a1, DWORD a2) {   /
 static DWORD __stdcall rt_dev_67(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetTextureStageState [A vvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNote3(67, a0, a1, a2);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[67])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[67])(self, a0, a1, a2);
     }
@@ -693,6 +702,7 @@ static DWORD __stdcall rt_dev_68(void* self, DWORD a0, DWORD a1, DWORD a2) {   /
 static DWORD __stdcall rt_dev_69(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetSamplerState [A vvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNote3(69, a0, a1, a2);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[69])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[69])(self, a0, a1, a2);
     }
@@ -718,6 +728,7 @@ static DWORD __stdcall rt_dev_70(void* self, DWORD a0) {   // ValidateDevice [S 
 static DWORD __stdcall rt_dev_71(void* self, DWORD a0, DWORD a1) {   // SetPaletteEntries [A vp1024]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(71);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[71])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[71])(self, a0, a1);
     }
@@ -742,6 +753,7 @@ static DWORD __stdcall rt_dev_72(void* self, DWORD a0, DWORD a1) {   // GetPalet
 static DWORD __stdcall rt_dev_73(void* self, DWORD a0) {   // SetCurrentTexturePalette [A v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(73);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[73])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[73])(self, a0);
     }
@@ -765,6 +777,7 @@ static DWORD __stdcall rt_dev_74(void* self, DWORD a0) {   // GetCurrentTextureP
 static DWORD __stdcall rt_dev_75(void* self, DWORD a0) {   // SetScissorRect [A p16]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(75);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[75])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[75])(self, a0);
     }
@@ -788,6 +801,7 @@ static DWORD __stdcall rt_dev_76(void* self, DWORD a0) {   // GetScissorRect [S 
 static DWORD __stdcall rt_dev_77(void* self, DWORD a0) {   // SetSoftwareVertexProcessing [A v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(77);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[77])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[77])(self, a0);
     }
@@ -811,6 +825,7 @@ static DWORD __stdcall rt_dev_78(void* self) {   // GetSoftwareVertexProcessing 
 static DWORD __stdcall rt_dev_79(void* self, DWORD a0) {   // SetNPatchMode [A v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(79);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[79])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[79])(self, a0);
     }
@@ -825,6 +840,7 @@ static float __stdcall rt_dev_80(void* self);   // GetNPatchMode (hand-written, 
 static DWORD __stdcall rt_dev_81(void* self, DWORD a0, DWORD a1, DWORD a2) {   // DrawPrimitive [A vvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(81);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[81])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[81])(self, a0, a1, a2);
     }
@@ -840,6 +856,7 @@ static DWORD __stdcall rt_dev_81(void* self, DWORD a0, DWORD a1, DWORD a2) {   /
 static DWORD __stdcall rt_dev_82(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5) {   // DrawIndexedPrimitive [A vvvvvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(82);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[82])(self, a0, a1, a2, a3, a4, a5); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[82])(self, a0, a1, a2, a3, a4, a5);
     }
@@ -860,6 +877,7 @@ static DWORD __stdcall rt_dev_84(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD
 static DWORD __stdcall rt_dev_85(void* self, DWORD a0, DWORD a1, DWORD a2, DWORD a3, DWORD a4, DWORD a5) {   // ProcessVertices [S vvvvvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(85);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[85])(self, a0, a1, a2, a3, a4, a5); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD))g_rtO_dev[85])(self, a0, a1, a2, a3, a4, a5);
     }
@@ -891,6 +909,7 @@ static DWORD __stdcall rt_dev_89(void* self, DWORD a0) {   // SetFVF [A v]
     rtDsInvalDecl();
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(89);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[89])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[89])(self, a0);
     }
@@ -923,6 +942,7 @@ static DWORD __stdcall rt_dev_91(void* self, DWORD a0, DWORD a1) {   // CreateVe
 static DWORD __stdcall rt_dev_92(void* self, DWORD a0) {   // SetVertexShader [A o]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNote1(92, a0);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[92])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[92])(self, a0);
     }
@@ -946,6 +966,7 @@ static DWORD __stdcall rt_dev_93(void* self, DWORD a0) {   // GetVertexShader [S
 static DWORD __stdcall rt_dev_94(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetVertexShaderConstantF [A vpc16@2v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteC(94, a0, a1, a2, 16);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[94])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[94])(self, a0, a1, a2);
     }
@@ -971,6 +992,7 @@ static DWORD __stdcall rt_dev_95(void* self, DWORD a0, DWORD a1, DWORD a2) {   /
 static DWORD __stdcall rt_dev_96(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetVertexShaderConstantI [A vpc16@2v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteC(96, a0, a1, a2, 16);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[96])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[96])(self, a0, a1, a2);
     }
@@ -996,6 +1018,7 @@ static DWORD __stdcall rt_dev_97(void* self, DWORD a0, DWORD a1, DWORD a2) {   /
 static DWORD __stdcall rt_dev_98(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetVertexShaderConstantB [A vpc4@2v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteC(98, a0, a1, a2, 4);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[98])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[98])(self, a0, a1, a2);
     }
@@ -1032,6 +1055,7 @@ static DWORD __stdcall rt_dev_101(void* self, DWORD a0, DWORD a1, DWORD a2, DWOR
 static DWORD __stdcall rt_dev_102(void* self, DWORD a0, DWORD a1) {   // SetStreamSourceFreq [A vv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(102);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[102])(self, a0, a1); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD))g_rtO_dev[102])(self, a0, a1);
     }
@@ -1076,6 +1100,7 @@ static DWORD __stdcall rt_dev_106(void* self, DWORD a0, DWORD a1) {   // CreateP
 static DWORD __stdcall rt_dev_107(void* self, DWORD a0) {   // SetPixelShader [A o]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNote1(107, a0);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[107])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[107])(self, a0);
     }
@@ -1099,6 +1124,7 @@ static DWORD __stdcall rt_dev_108(void* self, DWORD a0) {   // GetPixelShader [S
 static DWORD __stdcall rt_dev_109(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetPixelShaderConstantF [A vpc16@2v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteC(109, a0, a1, a2, 16);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[109])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[109])(self, a0, a1, a2);
     }
@@ -1124,6 +1150,7 @@ static DWORD __stdcall rt_dev_110(void* self, DWORD a0, DWORD a1, DWORD a2) {   
 static DWORD __stdcall rt_dev_111(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetPixelShaderConstantI [A vpc16@2v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteC(111, a0, a1, a2, 16);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[111])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[111])(self, a0, a1, a2);
     }
@@ -1149,6 +1176,7 @@ static DWORD __stdcall rt_dev_112(void* self, DWORD a0, DWORD a1, DWORD a2) {   
 static DWORD __stdcall rt_dev_113(void* self, DWORD a0, DWORD a1, DWORD a2) {   // SetPixelShaderConstantB [A vpc4@2v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteC(113, a0, a1, a2, 4);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[113])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[113])(self, a0, a1, a2);
     }
@@ -1174,6 +1202,7 @@ static DWORD __stdcall rt_dev_114(void* self, DWORD a0, DWORD a1, DWORD a2) {   
 static DWORD __stdcall rt_dev_115(void* self, DWORD a0, DWORD a1, DWORD a2) {   // DrawRectPatch [S vvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(115);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[115])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[115])(self, a0, a1, a2);
     }
@@ -1184,6 +1213,7 @@ static DWORD __stdcall rt_dev_115(void* self, DWORD a0, DWORD a1, DWORD a2) {   
 static DWORD __stdcall rt_dev_116(void* self, DWORD a0, DWORD a1, DWORD a2) {   // DrawTriPatch [S vvv]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(116);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[116])(self, a0, a1, a2); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD, DWORD, DWORD))g_rtO_dev[116])(self, a0, a1, a2);
     }
@@ -1194,6 +1224,7 @@ static DWORD __stdcall rt_dev_116(void* self, DWORD a0, DWORD a1, DWORD a2) {   
 static DWORD __stdcall rt_dev_117(void* self, DWORD a0) {   // DeletePatch [S v]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNoteBad(117);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[117])(self, a0); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*, DWORD))g_rtO_dev[117])(self, a0);
     }
@@ -2667,6 +2698,7 @@ static DWORD __stdcall rt_vb_1(void* self) {   // AddRef [D ]
     return ((DWORD(__stdcall*)(void*))g_rtO_vb[1])(self);
 }
 static DWORD __stdcall rt_vb_2(void* self) {   // Release [R ]
+    rtFBRelease(self);
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_vb[2])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
@@ -2784,6 +2816,7 @@ static DWORD __stdcall rt_ib_1(void* self) {   // AddRef [D ]
     return ((DWORD(__stdcall*)(void*))g_rtO_ib[1])(self);
 }
 static DWORD __stdcall rt_ib_2(void* self) {   // Release [R ]
+    rtFBRelease(self);
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_ib[2])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
@@ -2921,6 +2954,7 @@ static DWORD __stdcall rt_sb_3(void* self, DWORD a0) {   // GetDevice [D v]
 static DWORD __stdcall rt_sb_4(void* self) {   // Capture [A ]
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNote1(0x100 | 4, (DWORD)(ULONG_PTR)self);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_sb[4])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*))g_rtO_sb[4])(self);
     }
@@ -2934,6 +2968,7 @@ static DWORD __stdcall rt_sb_5(void* self) {   // Apply [A ]
     rtDsInvalAll();
     DWORD tid = __readfsdword(0x24);
     if (tid != g_rtMainTid || !g_rtActive || g_rtDirectScope) {
+        if (tid == g_rtWorkerTid && g_dvr.cur) dvNote1(0x100 | 5, (DWORD)(ULONG_PTR)self);
         if (g_rtActive && tid != g_rtWorkerTid && tid != g_rtMainTid) { EnterCriticalSection(&g_rtExecCs); DWORD r_ = ((DWORD(__stdcall*)(void*))g_rtO_sb[5])(self); LeaveCriticalSection(&g_rtExecCs); InterlockedIncrement(&g_rtNForeign); return r_; }
         return ((DWORD(__stdcall*)(void*))g_rtO_sb[5])(self);
     }
@@ -3607,6 +3642,8 @@ static const char* rtOpName(int op) {
     case 422: return "decl.Release";
     case 423: return "decl.GetDevice";
     case 424: return "decl.GetDeclaration";
+    case 507: return "texture.upload";
+    case 508: return "tween.mark";
     case 509: return "d3dx.FilterTexture";
     case 510: return "fx.batch";
     }

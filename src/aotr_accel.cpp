@@ -30,6 +30,11 @@ extern "C" {
 static char g_dir[MAX_PATH] = "";
 static char kLogPath[MAX_PATH] = "";
 static volatile LONG g_engineHooks = 0;   // may this build's absolute addresses be patched?
+static void (__stdcall* g_twDrawTag)(DWORD mesh, DWORD count) = NULL;   // in-between frames (aotr_tween.inc): which meshes a draw is
+static void (*g_twViewsEnd)() = NULL;                                    // in-between frames: the views are drawn, the interface follows
+static void (*g_scrFrame)(LONG64 dt) = NULL;                              // steady scroll speed (aotr_scroll.inc): the time since the frame before
+static void (*g_lpFrame)(LONG64 dt) = NULL;                               // the pan profiler (aotr_loadprof.inc): each frame's length
+static volatile DWORD g_lpPanTick = 0;                                    // when the camera was last scrolled (GetTickCount; aotr_scroll.inc tells)
 static void aotrSetDir(HMODULE self) {
     char p[MAX_PATH];
     DWORD n = GetModuleFileNameA(self, p, MAX_PATH);
@@ -59,7 +64,7 @@ static const char* aotrPath(char* out, const char* name) { wsprintfA(out, "%s\\%
 static CRITICAL_SECTION g_logCs;
 
 static void logf(const char* fmt, ...) {
-    char line[1024];
+    char line[1100];                                 // wvsprintfA writes at most 1024 characters: a longer line is cut short, never past the buffer
     SYSTEMTIME st;
     GetLocalTime(&st);
     int n = wsprintfA(line, "%02d:%02d:%02d.%03d  ", st.wHour, st.wMinute, st.wSecond, st.wMilliseconds);
@@ -653,7 +658,7 @@ static void installAllocatorSwap(BYTE* base) {
 // lazily built once); warm shadows update in parallel (read-only on shared geometry). rpmalloc
 // (stage 1b) makes the per-Update allocations thread-safe. Determinism-safe: shadow geometry is
 // visual only, never in the lockstep sync CRC. SEH-guarded: any fault -> stock path, never a crash.
-// All addresses/offsets verified against rotwk/game.dat.
+// All addresses/offsets verified against rotwk/game.dat (see SHADOW-OFFLOAD.md).
 
 static const BYTE kSigRenderShadows[] = {0xB8,0xCF,0x7E,0xB7,0x00,0xE8,0x40,0x8B,0x54,0x00,0x83,0xEC,0x24,0x53,0x56,0x57};
 static const char kMaskRenderShadows[] = "xxxxxxxxxxxxxxxx";
@@ -1033,8 +1038,10 @@ static void pcRunBatch(void** jobs, int n) {
     while (g_pcDone < n) YieldProcessor();
 }
 
+static void prSample(void* scene);                  // aotr_posrate.inc, included further down
 static void __fastcall hk_sceneRender(void* ecx, void* edx, void* rinfo) {
     InterlockedIncrement(&g_srFrames);
+    prSample(ecx);                                  // measurement only, and only when the ini asks for it
 #ifndef AOTR_PROD
     // Diagnostics only, and expensive where it fires: each capture writes about 140 lines from the game thread
     // while the frame waits (measured 41, 21, 20 and 20 ms in one battle). It is off in the production build.
@@ -1333,6 +1340,7 @@ static LONG64 g_stT0[3];
 static volatile LONG g_frHist[9];
 static LONG64 g_frEdge[8];                                  // 20, 25, 33.4, 40, 50, 66.7, 100, 200 ms in QPC ticks
 static volatile LONG64 g_frMax = 0;
+static volatile LONG g_frMaxTenths = 0;                     // the longest frame since the budget line last asked, in tenths of a millisecond
 static volatile LONG g_lgLastN = 0;
 static volatile LONG g_frByN[8];
 static volatile LONG64 g_frTByN[8];
@@ -1347,8 +1355,11 @@ static __forceinline void stBegin(int i) {
     if (i == 1) {
         if (g_mkLastViews) {
             LONG64 dt = t - g_mkLastViews; g_mkPeriod += dt;
+            if (g_scrFrame) g_scrFrame(dt);
+            if (g_lpFrame) g_lpFrame(dt);
             int b = 0; while (b < 8 && dt >= g_frEdge[b]) ++b;
             g_frHist[b]++; if (dt > g_frMax) g_frMax = dt;
+            { LONG tenths = (LONG)(dt * 10000 / (g_pqpf.QuadPart ? g_pqpf.QuadPart : 1)); if (tenths > g_frMaxTenths) g_frMaxTenths = tenths; }
             LONG k = g_lgLastN; g_frByN[k]++; g_frTByN[k] += dt;
         }
         g_mkLastViews = t; InterlockedIncrement(&g_mkFrames);
@@ -1358,7 +1369,7 @@ static void* __fastcall stCtor0(void* ecx, void* edx, DWORD a, DWORD b, DWORD c)
 static void* __fastcall stCtor1(void* ecx, void* edx, DWORD a, DWORD b, DWORD c) { stBegin(1); return ((tStageCtor)(ULONG_PTR)kStageCtor)(ecx, edx, a, b, c); }
 static void* __fastcall stCtor2(void* ecx, void* edx, DWORD a, DWORD b, DWORD c) { stBegin(2); return ((tStageCtor)(ULONG_PTR)kStageCtor)(ecx, edx, a, b, c); }
 static void __fastcall stDtor0(void* ecx, void* edx) { ((tStageDtor)(ULONG_PTR)kStageDtor)(ecx, edx); g_stTicks[0] += qpcNow() - g_stT0[0]; g_phase = g_stPrevPhase[0]; if (g_capOn) capPrintf("P stage-end 0\n"); }
-static void __fastcall stDtor1(void* ecx, void* edx) { ((tStageDtor)(ULONG_PTR)kStageDtor)(ecx, edx); g_stTicks[1] += qpcNow() - g_stT0[1]; g_phase = g_stPrevPhase[1]; if (g_capOn) capPrintf("P stage-end 1\n"); }
+static void __fastcall stDtor1(void* ecx, void* edx) { ((tStageDtor)(ULONG_PTR)kStageDtor)(ecx, edx); g_stTicks[1] += qpcNow() - g_stT0[1]; g_phase = g_stPrevPhase[1]; if (g_capOn) capPrintf("P stage-end 1\n"); if (g_twViewsEnd) g_twViewsEnd(); }
 static void __fastcall stDtor2(void* ecx, void* edx) { ((tStageDtor)(ULONG_PTR)kStageDtor)(ecx, edx); g_stTicks[2] += qpcNow() - g_stT0[2]; g_phase = g_stPrevPhase[2]; if (g_capOn) capPrintf("P stage-end 2\n"); }
 
 // GameEngine vtable 0xBFE260: +0x98 logic update (0x6329B0, runs one or more logic frames), +0x9C client update
@@ -1375,6 +1386,7 @@ static volatile ULONG64 g_lgEnterTsc = 0;                // when this frame's lo
 static void lsFrameBegin();
 static void lsFrameDone(DWORD ne, ULONG64 ticks);
 static void capFrameTick();
+static ULONG64 g_lgTscSum = 0;                               // time in the logic update so far, in rdtsc ticks (the logic limiter reads it: aotr_logicrate.inc)
 static void __fastcall phLogic(void* ecx, void* edx, DWORD n) {
     g_lgCurN = n < 7 ? (LONG)n : 0;
     if (g_capWanted) capFrameTick();
@@ -1382,7 +1394,7 @@ static void __fastcall phLogic(void* ecx, void* edx, DWORD n) {
     g_lgEnterTsc = __rdtsc();
     LONG prev = g_phase; g_phase = PH_LOGIC; LONG64 t0 = qpcNow();
     ((tEngLogic)(ULONG_PTR)kEngLogic)(ecx, edx, n);
-    lsFrameDone(n, __rdtsc() - g_lgEnterTsc);
+    { ULONG64 d_ = __rdtsc() - g_lgEnterTsc; g_lgTscSum += d_; lsFrameDone(n, d_); }
     LONG64 dt = qpcNow() - t0;
     g_phTicks[PH_LOGIC] += dt; g_phase = prev;
     LONG k = n < 8 ? (LONG)n : 0;
@@ -1448,6 +1460,45 @@ static void __fastcall hkAnTree(void* ecx, void* edx) {
 }
 #include "aotr_equivmemo.inc"
 #include "aotr_fastcrt.inc"
+#define FDB_LOG(...) logf(__VA_ARGS__)
+#include "aotr_fdbuf.inc"
+static DWORD WINAPI fdbReport(LPVOID) {
+    LONG lRead = 0, lReal = 0, lSeek = 0, lSeekReal = 0, lPass = 0; LONG64 lBytes = 0;
+    for (;;) {
+        Sleep(5000);
+        LONG rd = g_fdbNRead, real = g_fdbNReal, sk = g_fdbNSeek, skr = g_fdbNSeekReal, pass = g_fdbNPass; LONG64 by = rd64(&g_fdbBytes);
+        if (rd - lRead >= 2000 || pass - lPass >= 20000)
+            logf("files: last 5 s - %d reads answered from read-ahead (%d KB) by %d system reads; %d seeks answered here, %d by the system | %d reads left to the C runtime as they were | so far %d files read ahead of (%d of them open before this was installed), %d windows of 64 KB",
+                 (int)(rd - lRead), (int)((by - lBytes) >> 10), (int)(real - lReal), (int)(sk - lSeek), (int)(skr - lSeekReal), (int)(pass - lPass), (int)g_fdbNAdopt, (int)g_fdbNLate, (int)g_fdbNWin);
+        lRead = rd; lReal = real; lSeek = sk; lSeekReal = skr; lPass = pass; lBytes = by;
+    }
+}
+static void installFdBuf(BYTE* base) {
+    char ini[MAX_PATH]; aotrPath(ini, "bfme2_accel.ini");
+    int want = GetFileAttributesA(ini) != INVALID_FILE_ATTRIBUTES ? (int)GetPrivateProfileIntA("Engine", "FileReadAhead", 1, ini) : 1;
+    char env[16]; env[0] = 0;
+    if (GetEnvironmentVariableA("AOTR_FDBUF", env, sizeof(env)) && env[0]) want = env[0] - '0';
+    if (want <= 0) { logf("files: read-ahead off ([Engine] FileReadAhead = 0)."); return; }
+    HMODULE crt = GetModuleHandleA("msvcr71.dll");
+    if (!crt || !fdbInit(crt)) { logf("files: msvcr71's file functions were not found - read-ahead off."); return; }
+    // _read goes last: until it is hooked nothing is read ahead of, so no half-hooked state can mix positions
+    static const struct { const char* name; void* hook; } k[7] = { {"_wopen", (void*)&fdb_wopen}, {"_open", (void*)&fdb_open}, {"_close", (void*)&fdb_close}, {"_write", (void*)&fdb_write},
+        {"_get_osfhandle", (void*)&fdb_get_osfhandle}, {"_lseek", (void*)&fdb_lseek}, {"_read", (void*)&fdb_read} };
+    int n[7] = { 0, 0, 0, 0, 0, 0, 0 }; bool all = true;
+    for (int i = 0; i < 7; ++i) {
+        for (int guard = 0; guard < 8; ++guard) { FARPROC* slot = iatSlot(base, "msvcr71.dll", k[i].name); if (!slot || !hookSlot(slot, k[i].hook, NULL)) break; n[i]++; }
+        if (!n[i] && i >= 2 && i != 4) all = false;        // _close, _write, _lseek and _read are needed; the game may not import the others
+        if (!all) break;
+    }
+    if (!all || !n[6]) { logf("files: the game does not import msvcr71's _read / _lseek / _close / _write as expected - read-ahead stays off (hooks pass through)."); return; }
+    InterlockedExchange(&g_fdbOn, 1);
+    { wchar_t self[MAX_PATH]; bool ok = GetModuleFileNameW(crt, self, MAX_PATH) && fdbSelfTest(self);       // here, in this process, against msvcr71 itself
+      if (!ok) { InterlockedExchange(&g_fdbOn, 0); fdbAllRaw(); logf("files: the read-ahead self-test did NOT match msvcr71 - read-ahead is off for this session (every call passes through)."); return; } }
+    CreateThread(NULL, 0, fdbReport, NULL, 0, NULL);
+    logf("files: read-ahead installed (self-test against msvcr71 passed) - the engine's unbuffered file reads (one system call per few bytes while models and animations are parsed) are answered from 4-64 KB windows; "
+         "text-mode files and files open for writing are left alone. Import slots: _read %d, _lseek %d, _close %d, _write %d, _wopen %d, _open %d, _get_osfhandle %d. Files opened earlier are %s.",
+         n[6], n[5], n[2], n[3], n[0], n[1], n[4], g_fdbPio ? "taken up at their first read" : "left as they are (msvcr71's handle table was not understood)");
+}
 static void installPhaseTimers() {
     __try {
         static const BYTE kLogicPre[] = {0x55,0x56,0x57,0x68,0x50,0xE3,0xBF,0x00};
@@ -2368,11 +2419,31 @@ static void rotateLog() {
 #include "aotr_pick.inc"
 #include "aotr_subsys.inc"
 #include "aotr_logicspread.inc"
+#include "aotr_logicrate.inc"
+#include "aotr_fpscap.inc"
+#include "aotr_posrate.inc"
 #include "aotr_mutexcs.inc"
 #include "aotr_audiolimit.inc"
 #include "aotr_drawgen.inc"
 #include "aotr_rlsort.inc"
+#include "aotr_texmem.inc"
 #include "aotr_rt.inc"
+#include "aotr_merge.inc"
+#include "aotr_screen.inc"
+#include "aotr_pace.inc"
+#include "aotr_tween.inc"
+#include "aotr_texcache.inc"
+#include "aotr_texjobs.inc"
+#include "aotr_exitfix.inc"
+#include "aotr_scroll.inc"
+#include "aotr_luasort.inc"
+#include "aotr_streamset.inc"
+#include "aotr_terrain.inc"
+#include "aotr_filewarm.inc"
+#include "aotr_factions.inc"
+#include "aotr_shadowmap.inc"
+#define SP_RUNTIME 1
+#include "aotr_shadowpcf.inc"
 
 // ---------------------------------------------------------------- game-thread sampler v2 (RT build)
 // 100 samples/s of the game's render thread while frames are heavy (>= 30 ms) and the render thread is live.
@@ -2606,6 +2677,8 @@ static void startGameSampler() {
     g_gsStart = gsThread;                               // the RT report thread starts it at the first heavy 5 s window
 }
 
+#include "aotr_loadprof.inc"
+
 // ---------------------------------------------------------------- init
 static DWORD WINAPI initThread(LPVOID) {
     rotateLog();                                     // keep the log readable: >64 MB is renamed, never deleted
@@ -2691,6 +2764,8 @@ static DWORD WINAPI initThread(LPVOID) {
         }
     }
 
+    installTearFree();                               // [Engine] TearFree: DXVK asked for its tear-free mode, inside this process - before the game starts Direct3D
+
     // Stage 1b: reroute the game's heap onto rpmalloc (independent of the pathfinding hook).
     installAllocatorSwap(base);
 
@@ -2750,8 +2825,12 @@ static DWORD WINAPI initThread(LPVOID) {
         p_NtQIT = (tNtQIT)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationThread");
         profRefreshModules();
         // --- works on any build of this engine: D3D9 and d3dx9 vtables, and import-table entries found by name
+        installTexCache();                           // [Engine] TextureCache: what D3DX made of a texture is kept on disk and read back instead of decoded again
+        installTexJobs();                            // [Engine] TextureThreads: D3DX texture decoding on worker threads (before the render thread can go live)
         rtInit();                                    // render thread: D3D9 + D3DX effect work moves to a worker thread
         installFastCrt(base);                        // exact fast memcpy / memset / strlen / strcmp / floor ... for the game's imports
+        installFdBuf(base);                          // [Engine] FileReadAhead: the engine's unbuffered file reads answered from read-ahead windows
+        installFileWarm();                           // [Engine] FileWarm: every file the game can ask for is opened once in the background, so the virus scanner has looked at it before the game thread opens it
         installCrashLog();                           // fatal exceptions: where, registers and the call chain into the log (diagnostic only)
 
         // --- anchored to absolute addresses inside one verified build
@@ -2764,17 +2843,32 @@ static DWORD WINAPI initThread(LPVOID) {
         installFilterMemo();                         // object filter template checks memoized
         installModuleTimers();                       // logic step time by module type and sub-frame-5 subsystem
         installLogicSpread();                        // the logic step's list work cut by budget across its frames instead of piling up at n5 (same order)
+        installFpsCap();                             // [Engine] FpsLimit in the ini: the render cap raised in memory, with frames vs logic steps counted
+        installLogicRate();                          // [Engine] LogicHz: the simulation held at a fixed rate on the engine's own render-only frame path
+        installMerge();                              // [Engine] MergeDraws: runs of the same skinned model share a draw call through the engine's own multi-mesh path
+        installBudget();                             // where the game thread's frame goes, one line every five seconds (the timers run anyway)
+        installPosRate();                            // [Engine] MeasurePositions: how often a drawn object's transform actually changes
         installPoseWarm2();                          // skeleton tree updates of each render pass on worker threads (self-checked)
         if (g_diag) installClientTimers();           // client update / display draw call-site timers (measurement)
         if (g_diag) installFlushTimers();            // render pass breakdown timers (measurement)
         installDrawGen();                            // per-draw parameter writes generated beside the engine and compared (proving only)
         installRlSort();                             // mesh render list sort / push / clear without reference-count churn (identical, self-checked)
+        installTween();                              // [Engine] InBetweenFrames: the render thread draws a frame between every two of the game's (after rlsort: both look at the mesh draw's first bytes)
         installPick();                               // view scene pick: measured, repeats in one frame answered from the previous result (self-checked)
         if (g_diag) installSubsysTimers();           // per-subsystem timers inside the client update (measurement)
         installMutexCs();                            // unnamed engine mutexes -> user-mode recursive locks; Set_Transform counted per phase
         installAudioLimit();                         // sound request limit check: indexed count instead of a list walk per request (self-proving)
         installDeviceLock();                         // engine device mutex -> user-mode recursive lock
+        installLoadProf();                           // [Engine] LoadProfile: where the game thread is while a frame takes far too long (load screens)
+        installExitFix();                            // [Engine] ExitFix: the game's own crash on leaving a skirmish (a team writing into an attack area that was freed)
+        installSteadyScroll();                       // [Engine] SteadyScrollSpeed: the camera scrolls at one speed whatever the frame rate
+        installLuaSort();                            // [Engine] ScriptTableSort: the script engine's event table sorted by moving its records, not copying them (it is sorted again after every list added)
+        installStreamSets();                         // [Engine] StreamerSets: the asset streamer completes its wanted-asset sets without copying them on every asset added
+        installTerrain();                            // [Engine] TerrainThreads: each new ground patch texture built on several cores, its smaller levels written directly
+        installShadowScale();                        // [Engine] ShadowMapScale: the shadow map made 2 or 4 times as wide and high as the map asks for (an option; the picture changes)
+        installFactions();                           // [Engine] FactionAI: a computer player whose faction has no Skirmish player in the map gets one (the map's table of 20 sides no longer limits the factions)
         }
+        installSmoothShadows();                      // [Engine] SmoothShadows: the shadow lookup of nine weighted samples instead of four added up (an option; shadow edges change)
 #ifndef AOTR_PROD
         CreateThread(NULL, 0, rtReport, NULL, 0, NULL);
 #endif
@@ -2783,10 +2877,13 @@ static DWORD WINAPI initThread(LPVOID) {
 #endif
     }
 
+// (the name of the release, and a build number that goes up with every build handed out: the first thing a log says)
+#define AOTR_RELEASE "2.0"
+#define AOTR_BUILDNO 72
 #ifdef AOTR_PROD
-    logf("init: BFME2 Accelerator v47 PRODUCTION build live (Present now reports device loss to the engine - the alt-tab crash; no report threads, no per-frame counters, no scene captures; fast CRT now covers 16 imports - memcpy/memmove/memset/memcmp/memchr, strlen/strcmp/strncmp/strchr/_mbscpy/_strcmpi/_strnicmp, fabs/floor/ceil).");
+    logf("init: BFME2 Accelerator " AOTR_RELEASE " (build %d) live. What is switched on is in bfme2_accel.ini beside the DLL; every part says in this log what it found and what it does.", AOTR_BUILDNO);
 #else
-    logf("init: BFME2 Accelerator v47 build live (reporting on; fast CRT covers 16 imports).");
+    logf("init: BFME2 Accelerator " AOTR_RELEASE " (build %d) live - the build with the frame counters and report threads left in.", AOTR_BUILDNO);
 #endif
     return 0;
 }

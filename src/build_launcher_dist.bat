@@ -10,3 +10,5 @@ if errorlevel 1 ( echo RESOURCE BUILD FAILED & exit /b 1 )
 cl /nologo /O2 /MT /W3 /Fe:..\dist\bfme2_accel_loader.exe launcher.cpp launcher.res /link kernel32.lib user32.lib advapi32.lib gdi32.lib gdiplus.lib ole32.lib comdlg32.lib /SUBSYSTEM:WINDOWS /MANIFEST:NO
 if errorlevel 1 ( echo LOADER BUILD FAILED & exit /b 2 )
 copy /y ..\packaging\README.txt ..\dist\README.txt >nul
+rem the settings as shipped; a settings file that is already there (yours) is left alone
+if not exist ..\dist\bfme2_accel.ini copy /y ..\packaging\bfme2_accel.default.ini ..\dist\bfme2_accel.ini >nul

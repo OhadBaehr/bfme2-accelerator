@@ -61,3 +61,11 @@ __pycache__/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# ---- what the accelerator keeps beside the DLL on one machine ------------------------------------------------
+texcache/
+filewarm.lst
+
+# ---- the game's own compiled effects --------------------------------------------------------------------------
+# pcf_test and fxprobe read them; bigfxo.py copies them out of the game's Shaders.big. They are the game's.
+*.fxo

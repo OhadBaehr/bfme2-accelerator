@@ -12,6 +12,8 @@ static void logf(const char* fmt, ...) { va_list ap; va_start(ap, fmt); vprintf(
 static BYTE* makeTrampoline(BYTE*, int) { return NULL; }
 static BOOL patchJmp(BYTE*, void*, int) { return FALSE; }
 static void suspendOthers(HANDLE*, int* n, int) { *n = 0; }
+// the slicer reads marker files and the ini beside the DLL; offline there is neither
+static const char* aotrPath(char* out, const char* name) { lstrcpynA(out, name, MAX_PATH); return out; }
 static void resumeAll(HANDLE*, int) {}
 static double g_tscPerQpc = 1.0; static LARGE_INTEGER g_pqpf;
 #define SUB_N 12
@@ -71,8 +73,10 @@ static void body(DWORD self, DWORD n) {
     op(OP_TAIL, n);
     if (n == 1) op(OP_TAIL1);
 }
+static std::vector<int> g_paceSeq;                                                 // logical calls the driver actually ran
 static void __fastcall modelUpdate(DWORD self, void* edx, DWORD n) {               // the entry stub + the body
     if (!g_lsInDriver && lsDrive(self, n)) return;
+    if (g_lsInDriver) g_paceSeq.push_back((int)n);
     body(self, n);
 }
 static void engineStep(DWORD self, int pattern) {                                  // the dispatcher: one step's calls
@@ -86,6 +90,58 @@ static void engineStep(DWORD self, int pattern) {                               
         g_fakeTsc += 20000 + rnd() % 5000;                                         // the rest of the frame
     }
 }
+// ---- pacing: the renderer runs faster than the simulation
+// The engine asks for an update once per RENDERED frame. Here it is made to ask at twice and three times the rate
+// the simulation may advance, and the three things that must hold are checked: the logical calls still run 1..6 in
+// order with none dropped or repeated, every module is still updated exactly once per step, and the number that ran
+// follows the wall clock rather than the number of frames.
+static int pacedTest(DWORD self, int frames, int engineTimesFaster) {
+    const unsigned long long T = 60000;                                            // ticks between logical calls
+    g_lsThis = 0; g_lsNext = 7; g_lsPaused = 0; g_lsOn = 1; g_lsStepDriven = 0;
+    g_lsPaceHz = 30; g_lsPaceTicks = T; g_lsPaceLast = g_fakeTsc;
+    g_paceSeq.clear();
+    const unsigned long long clock0 = g_fakeTsc;
+    long badHere = 0;
+    std::vector<char> seen[4];
+    for (int k = 0; k < 4; ++k) seen[k].assign(g_count[k] + 64, 0);
+    for (int f = 0; f < frames; ++f) {
+        lsFrameBegin();
+        size_t before = g_paceSeq.size();
+        g_ops.clear();
+        modelUpdate(self, NULL, 1 + (DWORD)(f % 6));                               // whatever the engine happens to ask for
+        for (size_t i = 0; i < g_ops.size(); ++i)
+            if (g_ops[i].kind == OP_MODULE) {
+                char& c = seen[g_ops[i].a][g_ops[i].b];
+                if (c++ && badHere++ < 3) printf("PACED: module %d.%d updated twice in one step\n", g_ops[i].a, g_ops[i].b);
+            }
+        for (size_t i = before; i < g_paceSeq.size(); ++i)
+            if (g_paceSeq[i] == 6) {                                               // a step just completed
+                for (int k = 0; k < 4; ++k) {
+                    for (int j = 0; j < g_count[k]; ++j)
+                        if (!seen[k][j] && badHere++ < 3) printf("PACED: module %d.%d missed in a step\n", k, j);
+                    seen[k].assign(g_count[k] + 64, 0);
+                }
+            }
+        g_fakeTsc += T / (unsigned long long)engineTimesFaster;                    // the frame's own time
+    }
+    for (size_t i = 0; i < g_paceSeq.size(); ++i) {
+        int want = (int)(i % 6) + 1;
+        if (g_paceSeq[i] != want) {
+            if (badHere++ < 5) printf("PACED: call %u was %d, the stock order wants %d\n", (unsigned)i, g_paceSeq[i], want);
+            break;
+        }
+    }
+    // The logical work itself consumes time, so what the clock owes is elapsed time over T - not frames over the
+    // engine's rate. That is the whole point: the simulation follows the wall clock, not the frame count.
+    int expected = (int)((g_fakeTsc - clock0) / T);
+    int ran = (int)g_paceSeq.size();
+    if (ran < expected - 2 || ran > expected + 2) { printf("PACED: %d calls ran, the clock owed %d\n", ran, expected); ++badHere; }
+    printf("paced: engine asking %dx the logic rate, %d frames -> %d logical calls, clock owed %d, "
+           "order and once-per-step violations: %ld\n", engineTimesFaster, frames, ran, expected, badHere);
+    g_lsPaceTicks = 0; g_lsPaceHz = 0;                                             // back to the stock driver
+    return (int)badHere;
+}
+
 int main(int argc, char** argv) {
     if (argc > 1) g_rng = (unsigned)atoi(argv[1]);
     DWORD self = (DWORD)(ULONG_PTR)g_fakeLogic;
@@ -125,6 +181,12 @@ int main(int argc, char** argv) {
             for (size_t i = 0; i < g_ops.size(); ++i) if (g_ops[i].kind == OP_MODULE) ++mods;
         }
         if (!(rnd() % 6)) { *(DWORD*)(g_fakeLogic + 0x40) = 0; }                       // a new match: the frame counter starts over
+    }
+    {   // the renderer asking twice and three times as often as the simulation may advance
+        for (int k = 0; k < 4; ++k) { g_count[k] = 40 + (int)(rnd() % 60);
+            g_listMem[k][1] = 0x1000 + 4 * g_count[k]; }      // the buffer has to match the count
+        bad += pacedTest(self, 1200, 2);
+        bad += pacedTest(self, 1200, 3);
     }
     printf("seed %u: %ld steps (%ld driven by the slicer), %lld module updates, steps that differ from the stock order: %ld | leaves in a list %d, before the n5 block %d, catch-ups %d, odd %d, order self-check %d/%d bad\n",
            argc > 1 ? (unsigned)atoi(argv[1]) : 777u, steps, sliced, mods, bad, (int)g_lsPausesList, (int)g_lsPausesBlock, (int)g_lsCatchUp, (int)g_lsOdd, (int)g_lsSeqBad, (int)g_lsSeqChecked);

@@ -27,3 +27,6 @@
 *.res   binary
 *.dat   binary
 *.big   binary
+*.zip   binary
+*.cer   binary
+*.ico   binary

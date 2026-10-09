@@ -45,6 +45,17 @@ static ULONG64 g_lsT0 = 0, g_lsBudget = 0;         // this frame: start and budg
 static ULONG64 g_lsStepTicks = 0, g_lsTotalEma = 0, g_lsSubsEma = 0, g_lsSubsAtStep = 0;
 static volatile LONG g_lsSteps = 0, g_lsStockSteps = 0, g_lsPausesList = 0, g_lsPausesBlock = 0, g_lsOdd = 0, g_lsCatchUp = 0, g_lsMatches = 0;
 static volatile LONG g_lsStarted[8][8];            // [engine frame][logical call]: started or resumed there (report)
+// ---- logic pacing, for running the renderer faster than the simulation
+// The engine asks for an update once per RENDERED frame, so raising the frame cap speeds the simulation up -
+// measured 1.97x at a 60 fps cap, 6.05 frames to a logic step either way. With pacing on, the engine's n is
+// ignored entirely: the six logical calls are driven by the wall clock, in the stock order, each exactly once per
+// step. A frame with nothing owed renders and runs no logic at all, which is the whole point. Positions keep
+// moving at the paced rate (an object moves on every update(n), measured), and animation is a function of
+// wall-clock milliseconds already, so the extra frames show new poses for nothing.
+static ULONG64 g_lsPaceTicks = 0;                  // rdtsc ticks between logical calls; 0 = pacing off
+static ULONG64 g_lsPaceLast = 0;
+static LONG    g_lsPaceHz = 0;
+static volatile LONG g_lsPaceRan = 0, g_lsPaceSkipped = 0;
 static volatile ULONG64 g_lsMinTicks = 6000000;    // ~2 ms: a step cheaper than this is left to the engine (refined by the report thread)
 static ULONG64 g_lsFrameTicks[8];                  // this step: time the driver spent in each engine frame
 static LONG  g_lsFactor = 920;                     // frames 1-5 get step * factor / 6000; tuned so that frame 6 comes out like the others (v26: a fixed 1042 left it at 56%)
@@ -130,6 +141,34 @@ static void lsStepClosed() {                                           // the st
         g_lsSubsEma = g_lsSubsEma ? (g_lsSubsEma * 3 + s) / 4 : s;
     }
     g_lsStepTicks = 0;
+}
+// Pacing mode. Every engine call is answered here; what the engine asked for is not used. Whole logical calls
+// only - no mid-call splitting - because the point of this mode is that most frames do no logic at all.
+static int lsDrivePaced(DWORD self, DWORD fr, ULONG64 t0) {
+    if (self != g_lsThis) { g_lsThis = self; g_lsNext = 7; g_lsPaused = 0; g_lsPaceLast = t0; }
+    if (fr < g_lsLastFrame) {
+        g_lsMatches++; g_lsTotalEma = 0; g_lsSubsEma = 0; g_lsPaceLast = t0;
+        logf("logicspread: new match, game mode %d - logic paced at %d calls a second, independent of the frame rate.",
+             (int)*(DWORD*)(ULONG_PTR)(self + 0x110), (int)g_lsPaceHz);
+    }
+    g_lsLastFrame = fr;
+    if (*(BYTE*)(ULONG_PTR)(self + 0x125)) {                             // paused: the engine's own body returns at once
+        DWORD mode = *(DWORD*)(ULONG_PTR)(self + 0x110);
+        if (mode != 1 && mode != 5) { g_lsPaceLast = t0; return 0; }
+    }
+    LONG due = (LONG)((t0 - g_lsPaceLast) / g_lsPaceTicks);
+    if (due <= 0) { g_lsPaceSkipped++; return 1; }                       // nothing owed: this frame only renders
+    if (due > 12) { due = 12; g_lsPaceLast = t0; }                       // after a stall catch up, but never run away
+    else g_lsPaceLast += (ULONG64)due * g_lsPaceTicks;
+    g_lsEngineN = 6;                                                     // 6 == "run it to the end", no splitting
+    g_lsT0 = t0; g_lsBudget = 0;
+    for (LONG i = 0; i < due; ++i) {
+        if (g_lsNext > 6) { lsStepClosed(); g_lsNext = 1; g_lsSteps++; } // the step the six calls make up
+        lsRunLogical(self, g_lsNext);
+        g_lsPaceRan++;
+    }
+    { ULONG64 dt = __rdtsc() - t0; g_lsStepTicks += dt; }
+    return 1;
 }
 // the engine's update(n) call. 1 = answered here (the caller gets a plain return), 0 = run the engine's body for n
 static int __stdcall lsDrive(DWORD self, DWORD ne) {
@@ -353,6 +392,11 @@ static void installLogicSpread() {
           logf("logicspread: SLICER_OFF is present - the engine's frame schedule is left exactly as it ships.");
           return;
       } }
+
+    // [Engine] LogicHz used to be answered here by pacing these six calls from our own clock. That was the
+    // wrong layer - the scheduler above this hook advances its sub-frame counter once per RENDERED frame -
+    // and it broke animation. It is handled in aotr_logicrate.inc now, on the engine's own render-only path.
+
     g_lsSubsAtStep = lsSubsTotal();
     HANDLE fz[256]; int nf = 0;
     suspendOthers(fz, &nf, 256);
