@@ -1,3 +1,9 @@
+# Public API branch
+
+This branch uses explicit ABI-v1 initialization and a portable heap/CRT/preshader
+profile. Use the matching updated launcher and DLL; full-renderer features from the
+upstream description below are not enabled by this profile. See [API.md](API.md).
+
 # BFME2 Accelerator
 
 An in-process accelerator for *The Lord of the Rings: The Battle for Middle-earth II* and *The Rise of the

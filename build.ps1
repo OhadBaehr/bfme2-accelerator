@@ -16,13 +16,29 @@ call "$vcvars" >nul
 if errorlevel 1 exit /b 1
 cl /nologo /O2 /MT /W3 /WX /I"$PSScriptRoot/vendor/rpmalloc" /c "$PSScriptRoot/vendor/rpmalloc/rpmalloc.c"
 if errorlevel 1 exit /b 1
-cl /nologo /O2 /MT /W3 /WX $definitions /LD /I"$PSScriptRoot/vendor/rpmalloc" /Fe:bfme2_accel.new.dll "$PSScriptRoot/src/aotr_accel.cpp" rpmalloc.obj /link kernel32.lib user32.lib advapi32.lib /MAP
+cl /nologo /O2 /MT /W3 /WX $definitions /LD /I"$PSScriptRoot/vendor/rpmalloc" /Fe:bfme2_accel.dll "$PSScriptRoot/src/aotr_accel.cpp" rpmalloc.obj /link kernel32.lib user32.lib advapi32.lib /MAP
 if errorlevel 1 exit /b 1
 cl /nologo /O2 /MT /W3 /WX /DAOTR_PROD /I"$PSScriptRoot/vendor/rpmalloc" /Fe:compat_test.exe "$PSScriptRoot/src/compat_test.cpp" rpmalloc.obj /link kernel32.lib user32.lib advapi32.lib
 if errorlevel 1 exit /b 1
 compat_test.exe
 if errorlevel 1 exit /b 1
 cl /nologo /O2 /MT /W3 /WX /Fe:crt_test.exe "$PSScriptRoot/src/crt_test2.cpp" /link kernel32.lib
+if errorlevel 1 exit /b 1
+cl /nologo /O2 /MT /W3 /WX /Fe:testload.exe "$PSScriptRoot/src/testload.cpp" /link kernel32.lib
+if errorlevel 1 exit /b 1
+cl /nologo /O2 /MT /W3 /WX /Fe:api_test.exe "$PSScriptRoot/src/api_test.cpp" /link kernel32.lib
+if errorlevel 1 exit /b 1
+api_test.exe
+if errorlevel 1 exit /b 1
+cl /nologo /O2 /MT /W3 /WX /Fe:inject.exe "$PSScriptRoot/src/inject.cpp" /link kernel32.lib
+if errorlevel 1 exit /b 1
+call "$PSScriptRoot/src/prepare_art.bat"
+if errorlevel 1 exit /b 1
+pushd "$PSScriptRoot/src"
+rc /nologo /fo "$out/launcher.res" launcher.rc
+if errorlevel 1 exit /b 1
+popd
+cl /nologo /O2 /MT /W3 /WX /Fe:bfme2_accel_loader.exe "$PSScriptRoot/src/launcher.cpp" launcher.res /link kernel32.lib user32.lib advapi32.lib gdi32.lib gdiplus.lib ole32.lib comdlg32.lib /SUBSYSTEM:WINDOWS /MANIFEST:NO
 if errorlevel 1 exit /b 1
 cl /nologo /O2 /MT /W3 /WX /Fe:rt_harness.exe "$PSScriptRoot/src/rt_harness.cpp" /link kernel32.lib user32.lib
 exit /b %errorlevel%
@@ -39,4 +55,4 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "CRT comparison failed with exit code $LASTEXITCODE" }
     }
 } finally { Pop-Location }
-Write-Output "Built and tested: $(Join-Path $out 'bfme2_accel.new.dll')"
+Write-Output "Built and tested: $(Join-Path $out 'bfme2_accel.dll')"

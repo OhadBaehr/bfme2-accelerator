@@ -273,6 +273,7 @@ static DWORD WINAPI preshaderReport(LPVOID){
     return 0;
 }
 
+static bool g_apiPreshaderInstalled = false;
 static void installPreshaderHook(){
     if (!g_pc) {
         g_pc = (PreEnt*)VirtualAlloc(NULL, (SIZE_T)PRE_CACHE * sizeof(PreEnt), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -285,12 +286,13 @@ static void installPreshaderHook(){
     static const BYTE sig[] = {0x8B,0xFF,0x55,0x8B,0xEC,0x81,0xEC};
     if (memcmp(target, sig, sizeof(sig)) != 0) { logf("preshader: prologue mismatch - hook OFF."); return; }
     QueryPerformanceFrequency(&g_qpf);
-    g_preNoop = (GetEnvironmentVariableA("AOTR_NOPRESHADER", NULL, 0) > 0);
+    g_preNoop = false; // Never suppress shader evaluation through the public API.
     o_preshader = (tPreshader)makeTrampoline(target, 5);
     if (!o_preshader) { logf("preshader: trampoline alloc failed - hook OFF."); return; }
     HANDLE susp[256]; int nsusp=0; suspendOthers(susp,&nsusp,256);
-    patchJmp(target,(void*)&my_preshader,5);
+    g_apiPreshaderInstalled = patchJmp(target,(void*)&my_preshader,5) != FALSE;
     resumeAll(susp,nsusp);
+    if (!g_apiPreshaderInstalled) { logf("preshader: hook installation failed - cache OFF."); return; }
 #ifndef AOTR_PROD
     CreateThread(NULL,0,preshaderReport,NULL,0,NULL);
 #endif
@@ -607,6 +609,7 @@ static DWORD WINAPI allocReport(LPVOID) {
     return 0;
 }
 
+static bool g_apiHeapInstalled = false;
 static void installAllocatorSwap(BYTE* base) {
     const char* M = "msvcr71.dll";
     HANDLE frozen[64]; int nf = 0; bool suspended = false;
@@ -636,6 +639,7 @@ static void installAllocatorSwap(BYTE* base) {
         resumeAll(frozen, nf); suspended = false;
 
         if (!ok) { logf("alloc: IAT patch failed - leaving allocator as-is."); return; }
+        g_apiHeapInstalled = true;
         logf("alloc: rpmalloc installed on malloc/calloc/realloc/free (froze %d threads). Live.", nf);
 #ifndef AOTR_PROD
         CreateThread(NULL, 0, allocReport, NULL, 0, NULL);
@@ -2794,6 +2798,8 @@ static DWORD WINAPI initThread(LPVOID) {
     return 0;
 }
 
+#include "accel_api.inc"
+
 BOOL APIENTRY DllMain(HMODULE hMod, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hMod);
@@ -2806,7 +2812,7 @@ BOOL APIENTRY DllMain(HMODULE hMod, DWORD reason, LPVOID) {
         InitializeCriticalSectionAndSpinCount(&g_rtExecCs, 4000);     // short holds: spin before sleeping
 #endif
         InitializeCriticalSection(&g_rtInitCs);
-        CreateThread(NULL, 0, initThread, NULL, 0, NULL);   // keep work out of the loader lock
+        // Call Bfme2AccelInitialize after LoadLibrary returns.
     }
     return TRUE;
 }

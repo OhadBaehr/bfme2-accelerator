@@ -1,4 +1,4 @@
-// rt_harness.cpp - offline correctness test for the render thread (RT) in bfme2_accel.new.dll.
+// rt_harness.cpp - offline correctness test for the render thread (RT) in bfme2_accel.dll.
 //   rt_harness off <frames> <out.txt>   render with direct D3D9/D3DX calls
 //   rt_harness on  <frames> <out.txt>   same frames with the render thread installed
 // Every frame is read back (StretchRect -> GetRenderTargetData -> LockRect) and hashed; the two runs must
@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
     typedef void (__cdecl* ShroudF)(void*, DWORD, DWORD, DWORD, DWORD, const BYTE*, DWORD); ShroudF shroudRect = shroudRectDirect;
     typedef void (__cdecl* RadarF)(void*, DWORD, DWORD, DWORD, DWORD, DWORD, DWORD); RadarF radarOp = radarDirect;
     if (rt) {
-        HMODULE ha = LoadLibraryA("bfme2_accel.new.dll"); if (!ha) { printf("no bfme2_accel.new.dll (%lu)\n", GetLastError()); return 3; }
+        HMODULE ha = LoadLibraryA("bfme2_accel.dll"); if (!ha) { printf("no bfme2_accel.dll (%lu)\n", GetLastError()); return 3; }
         rtInstall = (InstallF)GetProcAddress(ha, "AotrRtTestInstall"); rtStats = (StatsF)GetProcAddress(ha, "AotrRtTestStats");
         rtScoped = (ScopedF)GetProcAddress(ha, "AotrRtTestScopedD3DX");
         rtToggle = (ToggleF)GetProcAddress(ha, "AotrRtTestToggle");
@@ -159,7 +159,7 @@ int main(int argc, char** argv) {
         radarOp = (RadarF)GetProcAddress(ha, "AotrRtTestRadarOp"); if (!radarOp) { printf("missing AotrRtTestRadarOp\n"); return 3; }
         if (optWrap) { typedef void (__cdecl* SeqF)(DWORD); SeqF sb = (SeqF)GetProcAddress(ha, "AotrRtTestSeqBase"); if (!sb) { printf("missing AotrRtTestSeqBase\n"); return 3; } sb(0xFFFFC000u); printf("queue sequence starts 16384 records before the 32-bit wrap\n"); }
         if (!rtInstall || !rtStats || !rtScoped) { printf("missing test exports\n"); return 3; }
-        Sleep(1500);                                      // let the DLL's own init thread finish its patching
+        // AotrRtTestInstall explicitly starts the renderer in this test process.
     }
     typedef void* (WINAPI* Create9F)(UINT);
     typedef HRESULT (WINAPI* CreateEffectF)(void*, const char*, UINT, void*, void*, DWORD, void*, void**, void**);
@@ -266,7 +266,7 @@ int main(int argc, char** argv) {
 
     printf("resources ready (x87 control word now %04x), parameter block handle form %08lX\n", _control87(0, 0) & 0xFFFF, blockA);
     if (rt) { int ok = rtInstall(dev, fx); printf("render thread install: %d\n", ok); if (!ok) return 7;
-        { typedef void (__cdecl* AnyF)(int); AnyF any = (AnyF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestAtlasAny"); if (any) any(1); }
+        { typedef void (__cdecl* AnyF)(int); AnyF any = (AnyF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestAtlasAny"); if (any) any(1); }
         D3DXCreateTexture = (CreateTextureF)rtScoped("D3DXCreateTexture"); D3DXFilterTexture = (FilterTextureF)rtScoped("D3DXFilterTexture"); }
     // a second parameter block recorded through the render thread
     CALL0(fx, 73); { float tint[4] = {0.9f, 1.0f, 1.1f, 1}; CALL2(fx, 34, hTint, tint); }
@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 1000000; ++i) ((HRESULT(WINAPI*)(void*, DWORD, const void*, UINT, UINT))vt(fx)[78])(fx, hWorld, m, 0, 64);
         QueryPerformanceCounter(&b1);
         printf("bench SetRawValue(64B): %.1f ns/call\n", (double)(b1.QuadPart - b0.QuadPart) * 1e9 / bf.QuadPart / 1000000);
-        { typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
+        { typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestStatsV4");
           char st[512]; if (s4) { s4(st, sizeof(st)); printf("  after SetRawValue: %s\n", st); } }
         { // parameter writes that keep changing: the value cache misses every time
           float mm[16]; for (int k = 0; k < 16; ++k) mm[k] = (float)k;
@@ -305,7 +305,7 @@ int main(int argc, char** argv) {
           float mm[16]; for (int k = 0; k < 16; ++k) mm[k] = (float)k;
           float v4[4] = {1, 2, 3, 4};
           LONGLONG ticks = 0; LONG calls = 0;
-          typedef void (__cdecl* HoldF)(int); HoldF hold = (HoldF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestHold");
+          typedef void (__cdecl* HoldF)(int); HoldF hold = (HoldF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestHold");
           for (int burst = 0; burst < 24; ++burst) {
               if (hold) hold(1);                                                                      // worker parked: the enqueue path alone
               QueryPerformanceCounter(&b0);
@@ -327,9 +327,9 @@ int main(int argc, char** argv) {
               CALL2(dev, 32, cap, sys);                                                               // drain, untimed
           }
           printf("bench game-like effect run (16 parameter writes + 2 device calls), enqueue only: %.1f ns/call\n", (double)ticks * 1e9 / bf.QuadPart / calls); }
-        { typedef void (__cdecl* CpuF)(char*, int); CpuF cf = (CpuF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestCpu");
+        { typedef void (__cdecl* CpuF)(char*, int); CpuF cf = (CpuF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestCpu");
           char st[1024]; if (cf) { cf(st, sizeof(st)); printf("  cpus during the first three benches: %s\n", st); } }
-        { typedef void (__cdecl* ThrF)(char*, int); ThrF tf = (ThrF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestThreads");
+        { typedef void (__cdecl* ThrF)(char*, int); ThrF tf = (ThrF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestThreads");
           static char st[8192]; if (tf) { tf(st, sizeof(st)); printf("  threads:\n%s", st); } }
         BYTE d[44];
         QueryPerformanceCounter(&b0);
@@ -344,7 +344,7 @@ int main(int argc, char** argv) {
         CALL2(dev, 32, cap, sys);                                               // sync point: wait for the worker to finish the backlog
         QueryPerformanceCounter(&b1);
         printf("bench drain of the backlog: %.1f ms\n", (double)(b1.QuadPart - b0.QuadPart) * 1e3 / bf.QuadPart);
-        { typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
+        { typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestStatsV4");
           char st[512]; if (s4) { s4(st, sizeof(st)); printf("bench wait stats: %s\n", st); } }
         return 0;
     }
@@ -412,7 +412,7 @@ int main(int argc, char** argv) {
           CALL2(fx, 30, hLong, fbits(0.9f + 0.1f * (float)cos(time))); CALL2(fx, 30, hMatVal, fbits(0.95f + 0.05f * (float)sin(time * 1.3f))); }
         blockC = ((DWORD(WINAPI*)(void*))vt(fx)[74])(fx);
         CALL1(fx, 75, (fr % 3 == 0) ? blockC : ((fr & 1) ? blockA : blockB));
-        if (rt && argc > 4 && !strcmp(argv[4], "capture")) { typedef void (__cdecl* CapF)(int); static CapF cap = (CapF)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestCaptureTick"); if (cap) cap(fr); }
+        if (rt && argc > 4 && !strcmp(argv[4], "capture")) { typedef void (__cdecl* CapF)(int); static CapF cap = (CapF)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestCaptureTick"); if (cap) cap(fr); }
         if (fr % 3 == 0) { LOCKED_RECT lr; if (SUCCEEDED(CALL3(atlasSurf, 13, &lr, 0, 0))) {
             for (int k = 0; k < 4; ++k) { int tx = ((fr / 3 + k * 3) & 7) * 32, ty = ((fr / 3 * 5 + k) & 7) * 32;
                 for (int y = 0; y < 32; ++y) for (int x = 0; x < 32; ++x) ((WORD*)((BYTE*)lr.pBits + (ty + y) * lr.Pitch))[tx + x] = (WORD)(0x8000u | ((fr * 7 + x * 3 + k) & 0x7FFF)); }
@@ -599,7 +599,7 @@ int main(int argc, char** argv) {
     printf("cached query mismatches: %d\n", queryMismatch);
     printf("sysmem lock mismatches: %d, render-target mirror mismatches: %d, lock-only call mismatches: %d\n", sysMismatch, mirrorMismatch, lockedMismatch);
     if (rt) { char st[512]; rtStats(st, sizeof(st)); printf("rt stats: %s\n", st);
-        typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.new.dll"), "AotrRtTestStatsV4");
+        typedef void (__cdecl* Stats4F)(char*, int); Stats4F s4 = (Stats4F)GetProcAddress(GetModuleHandleA("bfme2_accel.dll"), "AotrRtTestStatsV4");
         if (s4) { s4(st, sizeof(st)); printf("rt v4 stats: %s\n", st); } }
     return 0;
 }
