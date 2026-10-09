@@ -22,6 +22,10 @@ static void testAllocator() {
 }
 
 int main() {
+    Bfme2AccelRequest request = {32, 1, 0, 0, 0, 0, 0, 0};
+    g_apiState = 1;
+    assert(Bfme2AccelInitialize(&request) == BFME2_ACCEL_BUSY);
+    g_apiState = 0;
     testAllocator();
     g_rtFxV = (RtFxVal*)calloc(RT_FXV, sizeof(RtFxVal));
     assert(g_rtFxV);

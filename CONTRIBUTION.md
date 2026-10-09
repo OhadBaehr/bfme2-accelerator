@@ -17,13 +17,12 @@ and treats warnings as errors in production and report configurations.
 
 ## Scope and follow-up work
 
-These changes are extracted from pySAGE integration work. DLL naming, asynchronous
-DllMain initialization, engine hooks and renderer defaults remain upstream-compatible.
-The pySAGE-specific initializer and default-disabled renderer are not ported here.
-Reset rehooking, window-message lock handling and thread-identity changes need a
-separate renderer contribution: native D3D9/shim full-renderer validation remains
-unresolved. This patch does not claim to fix the observed renderer-on hang, improve
-measured game FPS, or establish multiplayer compatibility.
+The branch now also provides the explicit initialization contract documented in
+[API.md](API.md). The shared DLL supports both the standalone launcher and external
+loaders without a pySAGE dependency. DllMain no longer installs optimizations.
+The public v1 profile contains heap/CRT/preshader only; renderer and engine hooks
+require a later validated extension. Original renderer-only validation below is
+historical and must not be read as certification of the new API.
 
 ## Validation (2026-10-09)
 

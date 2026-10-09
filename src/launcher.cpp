@@ -22,6 +22,7 @@
 #include <commdlg.h>
 #include <stdio.h>
 #include <string.h>
+#include "accel_inject.h"
 using namespace Gdiplus;
 
 // ---------------------------------------------------------------- layout
@@ -220,28 +221,8 @@ static void enableDebugPrivilege() {
 }
 // This loader is 32-bit and so is game.dat, so kernel32's LoadLibraryA sits at the same address in both processes.
 static bool injectInto(DWORD pid, const char* dllFullPath) {
-    HANDLE hp = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION |
-                            PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, pid);
-    if (!hp) return false;
-    // A game that died during start-up is still here for a moment, and loading into its corpse used to succeed
-    // and write a cheerful "loaded" line - which read exactly like the accelerator having broken the game.
-    DWORD code = 0;
-    if (GetExitCodeProcess(hp, &code) && code != STILL_ACTIVE) { CloseHandle(hp); return false; }
-    SIZE_T len = strlen(dllFullPath) + 1;
-    void* remote = VirtualAllocEx(hp, NULL, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remote) { CloseHandle(hp); return false; }
-    SIZE_T wrote = 0;
-    if (!WriteProcessMemory(hp, remote, dllFullPath, len, &wrote)) {
-        VirtualFreeEx(hp, remote, 0, MEM_RELEASE); CloseHandle(hp); return false;
-    }
-    FARPROC loadLib = GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA");
-    HANDLE th = CreateRemoteThread(hp, NULL, 0, (LPTHREAD_START_ROUTINE)loadLib, remote, 0, NULL);
-    if (!th) { VirtualFreeEx(hp, remote, 0, MEM_RELEASE); CloseHandle(hp); return false; }
-    WaitForSingleObject(th, 15000);
-    DWORD mod = 0; GetExitCodeThread(th, &mod);
-    VirtualFreeEx(hp, remote, 0, MEM_RELEASE);
-    CloseHandle(th); CloseHandle(hp);
-    return mod != 0;
+    Bfme2AccelRequest report = {};
+    return accelInject(pid, dllFullPath, BFME2_ACCEL_SUPPORTED, &report);
 }
 // From here on there is no window: start the game, load into every game.dat of the session, leave when it is over.
 static void runHeadless(const char* exe) {
@@ -268,9 +249,9 @@ static void runHeadless(const char* exe) {
             Sleep(800);                              // let the game finish its own initial module loading
             if (!injectInto(pid, g_dll) && !warned) {
                 warned = true;
-                MessageBoxA(NULL, "The accelerator could not be loaded into the game.\n\n"
-                                  "The game keeps running normally, just without it.\n"
-                                  "bfme2_accel.log next to the loader says why.",
+                MessageBoxA(NULL, "The accelerator could not be fully initialized.\n\n"
+                                  "Some requested features may already be active.\n"
+                                  "Check the DLL/launcher versions and bfme2_accel.log.",
                             "BFME2 Accelerator", MB_ICONWARNING | MB_OK);
             }
             injectedPid = pid;                       // one attempt per instance
